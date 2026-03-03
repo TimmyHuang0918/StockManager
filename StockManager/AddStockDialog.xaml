@@ -1,0 +1,56 @@
+﻿<Window x:Class="StockManager.AddStockDialog"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                Title="新增股票" Height="500" Width="420"
+                WindowStartupLocation="CenterOwner"
+                ResizeMode="NoResize"
+                Background="#ECF0F1">
+        <Grid Margin="20">
+                <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <!-- 市場選擇 -->
+                <StackPanel Grid.Row="0" Margin="0,0,0,15">
+                        <TextBlock Text="市場:" FontWeight="Bold" Margin="0,0,0,5"/>
+                        <ComboBox x:Name="cmbMarket" Height="30" FontSize="14" SelectionChanged="CmbMarket_SelectionChanged">
+                                <ComboBoxItem Content="美股 (US)" IsSelected="True" Tag="US"/>
+                                <ComboBoxItem Content="台股 (TW)" Tag="TW"/>
+                        </ComboBox>
+                </StackPanel>
+
+                <!-- 股票代號 -->
+                <StackPanel Grid.Row="1" Margin="0,0,0,15">
+                        <TextBlock Text="股票代號:" FontWeight="Bold" Margin="0,0,0,5"/>
+                        <TextBox x:Name="txtTicker" Height="30" FontSize="14" VerticalContentAlignment="Center" TextChanged="TxtTicker_TextChanged"/>
+                        <TextBlock Text="例如: AAPL 或 2330.TW" Foreground="Gray" FontSize="10" Margin="0,3,0,0"/>
+                </StackPanel>
+
+                <!-- 股票名稱 -->
+                <StackPanel Grid.Row="2" Margin="0,0,0,15">
+                        <TextBlock Text="公司名稱:" FontWeight="Bold" Margin="0,0,0,5"/>
+                        <TextBox x:Name="txtName" Height="30" FontSize="14" VerticalContentAlignment="Center"/>
+                        <TextBlock Text="例如: 蘋果公司 或 台積電" Foreground="Gray" FontSize="10" Margin="0,3,0,0"/>
+                </StackPanel>
+
+                <!-- 建議清單 -->
+                <StackPanel Grid.Row="3" Margin="0,0,0,10">
+                        <TextBlock Text="建議股票（可點選自動帶入）:" FontWeight="Bold" Margin="0,0,0,5"/>
+                        <ListBox x:Name="lstSuggestions" MinHeight="170" SelectionChanged="LstSuggestions_SelectionChanged"/>
+                </StackPanel>
+
+                <!-- 按鈕 -->
+                <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+                        <Button x:Name="btnOk" Content="確定" Width="80" Height="35" Margin="0,0,10,0" 
+                                        Click="BtnOk_Click" Background="#27AE60" Foreground="White" 
+                                        FontWeight="Bold" BorderThickness="0" Cursor="Hand"/>
+                        <Button x:Name="btnCancel" Content="取消" Width="80" Height="35" 
+                                        Click="BtnCancel_Click" Background="#95A5A6" Foreground="White" 
+                                        FontWeight="Bold" BorderThickness="0" Cursor="Hand"/>
+                </StackPanel>
+        </Grid>
+</Window>

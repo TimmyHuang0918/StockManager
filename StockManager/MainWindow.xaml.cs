@@ -1,0 +1,1185 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
+using System.Windows.Documents;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Navigation;
+using System.Windows.Shapes;
+using System.Collections.ObjectModel;
+using System.Net;
+using System.Windows.Threading;
+using System.Xml.Linq;
+using StockManager.Models;
+using StockManager.Services;
+using StockManager.Config;
+
+namespace StockManager
+{
+        /// <summary>
+        /// MainWindow.xaml 的互動邏輯
+        /// </summary>
+        public partial class MainWindow : Window
+        {
+                private StockManagerService _usStockManager;
+                private StockManagerService _twStockManager;
+                private PriceFetcherService _usPriceFetcher;
+                private PriceFetcherService _twPriceFetcher;
+                private MonitorService _usMonitor;
+                private MonitorService _twMonitor;
+
+                private ObservableCollection<StockInfo> _usStockList;
+                private ObservableCollection<StockInfo> _twStockList;
+                private ObservableCollection<StockInfo> _usFilteredStockList;
+                private ObservableCollection<StockInfo> _twFilteredStockList;
+                private ObservableCollection<NewsImpactItem> _newsImpactList;
+                private DateTime _lastNewsUpdate = DateTime.MinValue;
+                private bool _isNewsUpdating = false;
+                private Dictionary<string, string> _translationCache = new Dictionary<string, string>();
+
+                private DispatcherTimer _updateTimer;
+                private DispatcherTimer _countdownTimer;
+                private int _countdownSeconds = 0;
+                private int _updateInterval = 10;
+
+                // 手動刷新防抖動
+                private DateTime _lastManualRefresh = DateTime.MinValue;
+                private const int MANUAL_REFRESH_COOLDOWN = 5; // 5 秒冷卻時間
+
+                private DebugWindow _debugWindow;
+
+                public MainWindow()
+                {
+                        InitializeComponent();
+                        InitializeServices();
+                        InitializeUI();
+                        StartMonitoring();
+
+                        // 重定向 Console 輸出到調試視窗
+                        Console.SetOut(new DebugTextWriter(this));
+                }
+
+                private void InitializeServices()
+                {
+                        // 初始化美股服務
+                        _usStockManager = new StockManagerService(AppConfig.DefaultStocks, AppConfig.UserStocksFile);
+                        _usPriceFetcher = new PriceFetcherService();
+                        _usMonitor = new MonitorService(_usStockManager, _usPriceFetcher);
+
+                        // 初始化台股服務
+                        _twStockManager = new StockManagerService(AppConfig.DefaultTwStocks, AppConfig.UserTwStocksFile);
+                        _twPriceFetcher = new PriceFetcherService();
+                        _twMonitor = new MonitorService(_twStockManager, _twPriceFetcher);
+                }
+
+                private void InitializeUI()
+                {
+                        // 初始化股票列表
+                        _usStockList = new ObservableCollection<StockInfo>();
+                        _twStockList = new ObservableCollection<StockInfo>();
+                        _usFilteredStockList = new ObservableCollection<StockInfo>();
+                        _twFilteredStockList = new ObservableCollection<StockInfo>();
+                        _newsImpactList = new ObservableCollection<NewsImpactItem>();
+
+                        dgUsStocks.ItemsSource = _usFilteredStockList;
+                        dgTwStocks.ItemsSource = _twFilteredStockList;
+                        dgNewsImpact.ItemsSource = _newsImpactList;
+
+                        // 載入股票數據
+                        LoadStockData();
+
+                        // 設置定時器
+                        _updateTimer = new DispatcherTimer();
+                        _updateTimer.Interval = TimeSpan.FromSeconds(1);
+                        _updateTimer.Tick += UpdateTimer_Tick;
+                        _updateTimer.Start();
+
+                        _countdownTimer = new DispatcherTimer();
+                        _countdownTimer.Interval = TimeSpan.FromSeconds(1);
+                        _countdownTimer.Tick += CountdownTimer_Tick;
+                        _countdownTimer.Start();
+                }
+
+                private void LoadStockData()
+                {
+                        // 載入美股
+                        var usStocks = _usStockManager.GetStocks();
+                        _usStockList.Clear();
+                        foreach (var stock in usStocks)
+                        {
+                                _usStockList.Add(new StockInfo(stock.Key, stock.Value));
+                        }
+                        ApplyFilter("US");
+
+                        // 載入台股
+                        var twStocks = _twStockManager.GetStocks();
+                        _twStockList.Clear();
+                        foreach (var stock in twStocks)
+                        {
+                                _twStockList.Add(new StockInfo(stock.Key, stock.Value));
+                        }
+                        ApplyFilter("TW");
+                }
+
+                private void StartMonitoring()
+                {
+                        _usMonitor.StartThreads(_updateInterval);
+                        _twMonitor.StartThreads(_updateInterval);
+                        statusText.Text = "監控已啟動";
+
+                        // 🐍 啟動時立即使用 yfinance 抓取一次數據
+                        Task.Run(() =>
+                        {
+                                PreloadStockData();
+                        });
+                }
+
+                /// <summary>
+                /// 🐍 預載股票數據（使用 Python yfinance）
+                /// 在應用啟動時執行一次，立即獲取所有股票的最新價格
+                /// </summary>
+                private void PreloadStockData()
+                {
+                        try
+                        {
+                                Dispatcher.Invoke(() =>
+                                {
+                                        statusText.Text = "🐍 正在使用 yfinance 載入股價數據...";
+                                });
+
+                                Console.WriteLine("========================================");
+                                Console.WriteLine("🐍 預載股票數據（Python yfinance）");
+                                Console.WriteLine("========================================");
+                                Console.WriteLine($"時間: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                                Console.WriteLine("");
+
+                                // 預載美股數據
+                                var usTickers = _usStockManager.GetTickers();
+                                Console.WriteLine($"📊 美股: 開始載入 {usTickers.Count} 支股票");
+
+                                int usSuccessCount = 0;
+                                int usFailCount = 0;
+
+                                for (int i = 0; i < usTickers.Count; i++)
+                                {
+                                        var ticker = usTickers[i];
+                                        Console.WriteLine($"  [{i + 1}/{usTickers.Count}] 正在載入 {ticker}...");
+
+                                        try
+                                        {
+                                                _usPriceFetcher.UpdatePriceWithPreviousClose(ticker);
+
+                                                // 檢查是否成功
+                                                var prices = _usPriceFetcher.GetPrices();
+                                                if (prices.ContainsKey(ticker) && prices[ticker].Item1.HasValue)
+                                                {
+                                                        Console.WriteLine($"    ✅ 成功: ${prices[ticker].Item1.Value:F2}");
+                                                        usSuccessCount++;
+                                                }
+                                                else
+                                                {
+                                                        Console.WriteLine($"    ⚠️  無數據");
+                                                        usFailCount++;
+                                                }
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                                Console.WriteLine($"    ❌ 失敗: {ex.Message}");
+                                                usFailCount++;
+                                        }
+
+                                        // 添加間隔避免請求過快
+                                        if (i < usTickers.Count - 1)
+                                        {
+                                                System.Threading.Thread.Sleep(300); // 300ms 間隔
+                                        }
+
+                                        // 更新進度
+                                        Dispatcher.Invoke(() =>
+                                        {
+                                                var progress = (i + 1) * 100.0 / usTickers.Count;
+                                                progressBar.Value = progress;
+                                                statusText.Text = $"🐍 載入美股 [{i + 1}/{usTickers.Count}] {ticker}...";
+                                        });
+                                }
+
+                                Console.WriteLine($"📊 美股載入完成: 成功 {usSuccessCount}/{usTickers.Count}, 失敗 {usFailCount}");
+                                Console.WriteLine("");
+
+                                // 預載台股數據
+                                var twTickers = _twStockManager.GetTickers();
+                                Console.WriteLine($"📊 台股: 開始載入 {twTickers.Count} 支股票");
+
+                                int twSuccessCount = 0;
+                                int twFailCount = 0;
+
+                                for (int i = 0; i < twTickers.Count; i++)
+                                {
+                                        var ticker = twTickers[i];
+                                        Console.WriteLine($"  [{i + 1}/{twTickers.Count}] 正在載入 {ticker}...");
+
+                                        try
+                                        {
+                                                _twPriceFetcher.UpdatePriceWithPreviousClose(ticker);
+
+                                                // 檢查是否成功
+                                                var prices = _twPriceFetcher.GetPrices();
+                                                if (prices.ContainsKey(ticker) && prices[ticker].Item1.HasValue)
+                                                {
+                                                        Console.WriteLine($"    ✅ 成功: ${prices[ticker].Item1.Value:F2}");
+                                                        twSuccessCount++;
+                                                }
+                                                else
+                                                {
+                                                        Console.WriteLine($"    ⚠️  無數據");
+                                                        twFailCount++;
+                                                }
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                                Console.WriteLine($"    ❌ 失敗: {ex.Message}");
+                                                twFailCount++;
+                                        }
+
+                                        // 添加間隔
+                                        if (i < twTickers.Count - 1)
+                                        {
+                                                System.Threading.Thread.Sleep(300);
+                                        }
+
+                                        // 更新進度
+                                        Dispatcher.Invoke(() =>
+                                        {
+                                                var progress = (i + 1) * 100.0 / twTickers.Count;
+                                                progressBar.Value = progress;
+                                                statusText.Text = $"🐍 載入台股 [{i + 1}/{twTickers.Count}] {ticker}...";
+                                        });
+                                }
+
+                                Console.WriteLine($"📊 台股載入完成: 成功 {twSuccessCount}/{twTickers.Count}, 失敗 {twFailCount}");
+                                Console.WriteLine("");
+                                Console.WriteLine("========================================");
+                                Console.WriteLine($"🎉 預載完成！總計: 美股 {usSuccessCount}/{usTickers.Count}, 台股 {twSuccessCount}/{twTickers.Count}");
+                                Console.WriteLine("========================================");
+                                Console.WriteLine("");
+
+                                // 更新 UI 顯示
+                                Dispatcher.Invoke(() =>
+                                {
+                                        UpdatePriceDisplay();
+                                        progressBar.Value = 0;
+                                        statusText.Text = $"✅ 預載完成 - 美股 {usSuccessCount}/{usTickers.Count}, 台股 {twSuccessCount}/{twTickers.Count}";
+                                });
+                        }
+                        catch (Exception ex)
+                        {
+                                Console.WriteLine($"❌ 預載數據失敗: {ex.Message}");
+                                Console.WriteLine($"堆疊追蹤: {ex.StackTrace}");
+
+                                Dispatcher.Invoke(() =>
+                                {
+                                        statusText.Text = "⚠️ 預載失敗，將使用定時更新";
+                                        progressBar.Value = 0;
+                                });
+                        }
+                }
+
+                private void UpdateTimer_Tick(object sender, EventArgs e)
+                {
+                        UpdatePriceDisplay();
+                }
+
+                private void CountdownTimer_Tick(object sender, EventArgs e)
+                {
+                        _countdownSeconds++;
+                        if (_countdownSeconds >= _updateInterval)
+                        {
+                                _countdownSeconds = 0;
+                        }
+
+                        int remaining = _updateInterval - _countdownSeconds;
+                        double progress = (_countdownSeconds / (double)_updateInterval) * 100;
+
+                        progressBar.Value = progress;
+
+                        var currentTab = marketTabControl.SelectedItem as TabItem;
+                        var tabHeader = currentTab?.Header?.ToString() ?? "";
+                        statusText.Text = $"下次更新: {remaining} 秒 | 當前市場: {tabHeader}";
+                }
+
+                private void UpdatePriceDisplay()
+                {
+                        // 更新美股價格顯示
+                        var usPrices = _usPriceFetcher.GetPrices();
+                        var usPriceMeta = _usPriceFetcher.GetPriceMeta();
+
+                        Console.WriteLine($"=== 更新價格顯示 ({DateTime.Now:HH:mm:ss}) ===");
+                        Console.WriteLine($"美股數據: {usPrices.Count} 筆");
+
+                        foreach (var stock in _usStockList)
+                        {
+                                if (usPrices.ContainsKey(stock.Ticker))
+                                {
+                                        var priceData = usPrices[stock.Ticker];
+                                        stock.Price = priceData.Item1;
+
+                                        // 🎯 自己計算漲跌幅：從 Meta 獲取前收盤價
+                                        if (usPriceMeta.ContainsKey(stock.Ticker))
+                                        {
+                                                var meta = usPriceMeta[stock.Ticker];
+
+                                                // 獲取前收盤價
+                                                double? previousClose = null;
+                                                if (meta.ContainsKey("previous_close") && meta["previous_close"] != null)
+                                                {
+                                                        previousClose = meta["previous_close"] as double?;
+                                                }
+
+                                                // 設置前收盤價到 UI
+                                                stock.PreviousClose = previousClose;
+
+                                                // 手動計算漲跌幅
+                                                if (stock.Price.HasValue && previousClose.HasValue && previousClose.Value != 0)
+                                                {
+                                                        var change = stock.Price.Value - previousClose.Value;
+                                                        stock.ChangePercent = (change / previousClose.Value) * 100;
+
+                                                        Console.WriteLine($"  [手動計算] {stock.Ticker}: 當前=${stock.Price.Value:F2}, 前收=${previousClose.Value:F2}, 漲跌幅={stock.ChangePercent.Value:F2}%");
+                                                }
+                                                else
+                                                {
+                                                        // 如果沒有前收盤價，使用 API 返回的漲跌幅
+                                                        stock.ChangePercent = priceData.Item2;
+
+                                                        if (stock.ChangePercent.HasValue)
+                                                        {
+                                                                Console.WriteLine($"  [API數據] {stock.Ticker}: Price={stock.Price?.ToString("F2") ?? "null"}, Change={stock.ChangePercent.Value:F2}%");
+                                                        }
+                                                }
+
+                                                // 更新來源和時間
+                                                stock.Source = meta.ContainsKey("source") ? meta["source"]?.ToString() : "N/A";
+                                                stock.UpdatedAt = meta.ContainsKey("updated_at") ? meta["updated_at"] as DateTime? : null;
+                                        }
+                                        else
+                                        {
+                                                // 沒有 Meta 數據，使用 API 返回的漲跌幅
+                                                stock.ChangePercent = priceData.Item2;
+                                        }
+
+                                        // 輝達特殊診斷
+                                        if (stock.Name == "輝達")
+                                        {
+                                                Console.WriteLine($"\n========== 輝達 (NVDA) 詳細診斷 ==========");
+                                                Console.WriteLine($"當前價格: ${stock.Price?.ToString("F2") ?? "null"}");
+                                                Console.WriteLine($"漲跌幅: {stock.ChangePercent?.ToString("F2") ?? "null"}%");
+
+                                                if (stock.Price.HasValue && stock.ChangePercent.HasValue)
+                                                {
+                                                        // 反推系統使用的前收盤價
+                                                        double impliedPreviousClose = stock.Price.Value / (1 + stock.ChangePercent.Value / 100);
+                                                        Console.WriteLine($"系統使用的前收盤價: ${impliedPreviousClose:F2}");
+
+                                                        // 與正確值比較
+                                                        double correctPreviousClose = 195.56;
+                                                        Console.WriteLine($"正確的前收盤價: ${correctPreviousClose:F2}");
+                                                        Console.WriteLine($"差異: ${Math.Abs(impliedPreviousClose - correctPreviousClose):F2}");
+
+                                                        if (Math.Abs(impliedPreviousClose - correctPreviousClose) < 0.10)
+                                                        {
+                                                                Console.WriteLine($"✅ 前收盤價正確！");
+                                                        }
+                                                        else
+                                                        {
+                                                                Console.WriteLine($"❌ 前收盤價錯誤！");
+                                                        }
+                                                }
+                                                Console.WriteLine($"==========================================\n");
+                                        }
+                                }
+                        }
+
+                        // 更新台股價格顯示
+                        var twPrices = _twPriceFetcher.GetPrices();
+                        var twPriceMeta = _twPriceFetcher.GetPriceMeta();
+
+                        Console.WriteLine($"台股數據: {twPrices.Count} 筆");
+
+                        foreach (var stock in _twStockList)
+                        {
+                                if (twPrices.ContainsKey(stock.Ticker))
+                                {
+                                        var priceData = twPrices[stock.Ticker];
+                                        stock.Price = priceData.Item1;
+                                        stock.ChangePercent = priceData.Item2;
+
+                                        // 從 Meta 獲取前收盤價（台股）
+                                        if (twPriceMeta.ContainsKey(stock.Ticker))
+                                        {
+                                                var meta = twPriceMeta[stock.Ticker];
+
+                                                double? previousClose = null;
+                                                if (meta.ContainsKey("previous_close") && meta["previous_close"] != null)
+                                                {
+                                                        previousClose = meta["previous_close"] as double?;
+                                                }
+
+                                                // 設置前收盤價到 UI
+                                                stock.PreviousClose = previousClose;
+
+                                                // 優先用前收盤價自行計算漲跌幅
+                                                if (stock.Price.HasValue && previousClose.HasValue && previousClose.Value != 0)
+                                                {
+                                                        var change = stock.Price.Value - previousClose.Value;
+                                                        stock.ChangePercent = (change / previousClose.Value) * 100;
+                                                }
+                                        }
+
+                                        // 詳細診斷日誌
+                                        var priceStr = priceData.Item1?.ToString("F2") ?? "null";
+                                        var changeStr = stock.ChangePercent?.ToString("F2") ?? "null";
+                                        var hasChange = stock.ChangePercent.HasValue ? "✅" : "❌";
+                                        Console.WriteLine($"  {stock.Ticker}: Price={priceStr}, Change={changeStr}% {hasChange}");
+                                }
+                                if (twPriceMeta.ContainsKey(stock.Ticker))
+                                {
+                                        var meta = twPriceMeta[stock.Ticker];
+                                        stock.Source = meta.ContainsKey("source") ? meta["source"]?.ToString() : "N/A";
+                                        stock.UpdatedAt = meta.ContainsKey("updated_at") ? meta["updated_at"] as DateTime? : null;
+                                }
+                        }
+
+                        dgUsStocks.Items.Refresh();
+                        dgTwStocks.Items.Refresh();
+                        _ = UpdateNewsImpactAsync();
+                        Console.WriteLine("=== UI 已刷新 ===\n");
+                }
+
+                private async Task UpdateNewsImpactAsync()
+                {
+                        if (_isNewsUpdating)
+                        {
+                                return;
+                        }
+
+                        if ((DateTime.Now - _lastNewsUpdate).TotalSeconds < 60)
+                        {
+                                return;
+                        }
+
+                        _isNewsUpdating = true;
+                        try
+                        {
+                                var currentTab = marketTabControl.SelectedIndex;
+                                var isUsMarket = currentTab == 0;
+                                var keyword = isUsMarket ? "US stock market finance" : "台股 財經";
+
+                                var newsItems = await Task.Run(() => GetLatestNews(keyword, isUsMarket));
+
+                                txtMaxImpactStock.Text = $"{(isUsMarket ? "美股" : "台股")}新聞｜更新時間：{DateTime.Now:HH:mm:ss}";
+
+                                _newsImpactList.Clear();
+                                foreach (var item in newsItems)
+                                {
+                                        _newsImpactList.Add(item);
+                                }
+
+                                _lastNewsUpdate = DateTime.Now;
+                        }
+                        catch (Exception ex)
+                        {
+                                Console.WriteLine($"[新聞影響] 更新失敗: {ex.Message}");
+                        }
+                        finally
+                        {
+                                _isNewsUpdating = false;
+                        }
+                }
+
+                private List<NewsImpactItem> GetLatestNews(string keyword, bool isUsMarket)
+                {
+                        var result = new List<NewsImpactItem>();
+                        try
+                        {
+                                var q = Uri.EscapeDataString(keyword);
+                                var url = isUsMarket
+                                        ? $"https://news.google.com/rss/search?q={q}&hl=en-US&gl=US&ceid=US:en"
+                                        : $"https://news.google.com/rss/search?q={q}&hl=zh-TW&gl=TW&ceid=TW:zh-Hant";
+
+                                using (var client = new WebClient())
+                                {
+                                        client.Encoding = Encoding.UTF8;
+                                        var xml = client.DownloadString(url);
+                                        var doc = XDocument.Parse(xml);
+                                        var items = doc.Descendants("item").Take(12);
+
+                                        foreach (var item in items)
+                                        {
+                                                var originalTitle = item.Element("title")?.Value ?? "(無標題)";
+                                                var title = originalTitle;
+                                                if (isUsMarket)
+                                                {
+                                                        title = TranslateHeadlineToTraditionalChinese(title);
+                                                }
+
+                                                var source = item.Element("source")?.Value ?? "新聞來源";
+                                                DateTime published;
+                                                var pubDateText = item.Element("pubDate")?.Value;
+                                                var showTime = DateTime.TryParse(pubDateText, out published)
+                                                        ? published.ToString("MM-dd HH:mm")
+                                                        : "--";
+
+                                                var importanceScore = CalculateNewsImportance(originalTitle, source, showTime == "--" ? (DateTime?)null : published);
+
+                                                result.Add(new NewsImpactItem
+                                                {
+                                                        Time = showTime,
+                                                        Headline = title,
+                                                        Source = source,
+                                                        ImportanceScore = importanceScore,
+                                                        ImportanceLevel = GetImportanceLevel(importanceScore)
+                                                });
+                                        }
+                                }
+                        }
+                        catch (Exception ex)
+                        {
+                                Console.WriteLine($"[最新新聞] 載入失敗: {ex.Message}");
+                        }
+
+                        if (result.Count == 0)
+                        {
+                                result.Add(new NewsImpactItem
+                                {
+                                        Time = "--",
+                                        Headline = "目前無法取得最新新聞",
+                                        Source = "系統",
+                                        ImportanceScore = 0,
+                                        ImportanceLevel = "--"
+                                });
+                        }
+
+                        return result;
+                }
+
+                private string TranslateHeadlineToTraditionalChinese(string text)
+                {
+                        if (string.IsNullOrWhiteSpace(text))
+                        {
+                                return text;
+                        }
+
+                        // 已含中文就不翻譯
+                        if (Regex.IsMatch(text, "[\u4e00-\u9fff]"))
+                        {
+                                return text;
+                        }
+
+                        if (_translationCache.ContainsKey(text))
+                        {
+                                return _translationCache[text];
+                        }
+
+                        try
+                        {
+                                var q = Uri.EscapeDataString(text);
+                                var url = $"https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=zh-TW&dt=t&q={q}";
+
+                                using (var client = new WebClient())
+                                {
+                                        client.Encoding = Encoding.UTF8;
+                                        var response = client.DownloadString(url);
+
+                                        var match = Regex.Match(response, "^\\[\\[\\[\"(?<translated>.*?)\"");
+                                        if (match.Success)
+                                        {
+                                                var translated = Regex.Unescape(match.Groups["translated"].Value);
+                                                translated = translated.Replace("\\n", " ");
+                                                _translationCache[text] = translated;
+                                                return translated;
+                                        }
+                                }
+                        }
+                        catch (Exception ex)
+                        {
+                                Console.WriteLine($"[新聞翻譯] 失敗: {ex.Message}");
+                        }
+
+                        _translationCache[text] = text;
+                        return text;
+                }
+
+                private int CalculateNewsImportance(string title, string source, DateTime? publishedAt)
+                {
+                        if (string.IsNullOrWhiteSpace(title))
+                        {
+                                return 20;
+                        }
+
+                        var t = title.ToLowerInvariant();
+                        var score = 10;
+
+                        var highImpactKeywords = new[]
+                        {
+                                "earnings", "guidance", "fed", "rate", "inflation", "bankruptcy", "lawsuit", "merger", "acquisition",
+                                "財報", "升息", "降息", "通膨", "併購", "裁員", "訴訟", "破產", "停止交易", "停牌"
+                        };
+
+                        var mediumImpactKeywords = new[]
+                        {
+                                "analyst", "target", "rating", "forecast", "outlook", "estimate",
+                                "目標價", "評級", "展望", "預測", "估值", "庫存", "買入", "賣出"
+                        };
+
+                        var highHitCount = highImpactKeywords.Count(k => t.Contains(k));
+                        var mediumHitCount = mediumImpactKeywords.Count(k => t.Contains(k));
+
+                        score += Math.Min(highHitCount * 18, 54);
+                        score += Math.Min(mediumHitCount * 8, 24);
+
+                        if (Regex.IsMatch(t, "\\d+(\\.\\d+)?%"))
+                        {
+                                score += 8;
+                        }
+
+                        if (t.Contains("breaking") || t.Contains("urgent") || t.Contains("突發") || t.Contains("快訊"))
+                        {
+                                score += 10;
+                        }
+
+                        if (t.Contains("surge") || t.Contains("plunge") || t.Contains("rally") ||
+                                t.Contains("暴跌") || t.Contains("重挫") || t.Contains("大漲") || t.Contains("飆升"))
+                        {
+                                score += 10;
+                        }
+
+                        if (t.Contains("rumor") || t.Contains("傳聞") || t.Contains("市場傳言"))
+                        {
+                                score -= 8;
+                        }
+
+                        var s = (source ?? string.Empty).ToLowerInvariant();
+                        if (s.Contains("reuters") || s.Contains("bloomberg") || s.Contains("wsj") ||
+                                s.Contains("cnbc") || s.Contains("financial times") || s.Contains("associated press"))
+                        {
+                                score += 8;
+                        }
+
+                        if (publishedAt.HasValue)
+                        {
+                                var ageMinutes = Math.Max(0, (DateTime.Now - publishedAt.Value).TotalMinutes);
+                                if (ageMinutes <= 30) score += 10;
+                                else if (ageMinutes <= 120) score += 6;
+                                else if (ageMinutes <= 1440) score += 3;
+                        }
+
+                        // 若關鍵字都沒命中，給保守基準分
+                        if (highHitCount == 0 && mediumHitCount == 0)
+                        {
+                                score += 20;
+                        }
+
+                        return Math.Max(0, Math.Min(100, score));
+                }
+
+                private string GetImportanceLevel(int score)
+                {
+                        if (score >= 75) return "高";
+                        if (score >= 50) return "中";
+                        return "低";
+                }
+
+                private void BtnAddStock_Click(object sender, RoutedEventArgs e)
+                {
+                        var dialog = new AddStockDialog();
+                        if (dialog.ShowDialog() == true)
+                        {
+                                var ticker = dialog.Ticker.ToUpper();
+                                var name = dialog.StockName;
+                                var market = dialog.Market;
+
+                                if (market == "US")
+                                {
+                                        _usStockManager.AddStock(ticker, name);
+                                }
+                                else
+                                {
+                                        _twStockManager.AddStock(ticker, name);
+                                }
+
+                                LoadStockData();
+                                MessageBox.Show($"已新增股票: {ticker} - {name}", "成功", MessageBoxButton.OK, MessageBoxImage.Information);
+                        }
+                }
+
+                private void BtnRemoveStock_Click(object sender, RoutedEventArgs e)
+                {
+                        var currentTab = marketTabControl.SelectedIndex;
+                        DataGrid currentGrid = currentTab == 0 ? dgUsStocks : dgTwStocks;
+
+                        if (currentGrid.SelectedItem is StockInfo selectedStock)
+                        {
+                                var result = MessageBox.Show(
+                                        $"確定要移除股票 {selectedStock.Ticker} - {selectedStock.Name} 嗎？",
+                                        "確認移除",
+                                        MessageBoxButton.YesNo,
+                                        MessageBoxImage.Question);
+
+                                if (result == MessageBoxResult.Yes)
+                                {
+                                        if (currentTab == 0)
+                                        {
+                                                _usStockManager.RemoveStock(selectedStock.Ticker);
+                                        }
+                                        else
+                                        {
+                                                _twStockManager.RemoveStock(selectedStock.Ticker);
+                                        }
+
+                                        LoadStockData();
+                                        MessageBox.Show("已移除股票", "成功", MessageBoxButton.OK, MessageBoxImage.Information);
+                                }
+                        }
+                        else
+                        {
+                                MessageBox.Show("請先選擇要移除的股票", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        }
+                }
+
+                private void BtnTwFilter_Click(object sender, RoutedEventArgs e)
+                {
+                        var filterWindow = new TwStockFilterWindow();
+                        filterWindow.Owner = this;
+                        filterWindow.Show();
+                }
+
+                public bool TryAddTwStockFromFilter(string ticker, string name, out string message)
+                {
+                        if (string.IsNullOrWhiteSpace(ticker))
+                        {
+                                message = "股票代號無效，無法加入。";
+                                return false;
+                        }
+
+                        var normalizedTicker = ticker.Trim().ToUpperInvariant();
+                        if (!normalizedTicker.EndsWith(".TW", StringComparison.OrdinalIgnoreCase))
+                        {
+                                normalizedTicker += ".TW";
+                        }
+
+                        var twStocks = _twStockManager.GetStocks();
+                        if (twStocks.ContainsKey(normalizedTicker))
+                        {
+                                message = $"{normalizedTicker} 已在主頁面台股清單中。";
+                                return false;
+                        }
+
+                        var stockName = string.IsNullOrWhiteSpace(name) ? normalizedTicker : name.Trim();
+                        _twStockManager.AddStock(normalizedTicker, stockName);
+                        LoadStockData();
+
+                        message = $"已加入主頁面清單：{normalizedTicker} - {stockName}";
+                        statusText.Text = message;
+                        return true;
+                }
+
+                private void BtnRefresh_Click(object sender, RoutedEventArgs e)
+                {
+                        // 檢查冷卻時間
+                        var now = DateTime.Now;
+                        var timeSinceLastRefresh = (now - _lastManualRefresh).TotalSeconds;
+
+                        if (timeSinceLastRefresh < MANUAL_REFRESH_COOLDOWN)
+                        {
+                                var remaining = MANUAL_REFRESH_COOLDOWN - (int)timeSinceLastRefresh;
+                                statusText.Text = $"⏰ 請稍後 {remaining} 秒再刷新";
+                                Console.WriteLine($"[手動刷新] 冷卻中，剩餘 {remaining} 秒");
+                                return;
+                        }
+
+                        // 更新最後刷新時間
+                        _lastManualRefresh = now;
+                        _countdownSeconds = 0;
+                        statusText.Text = "🔄 手動刷新中...";
+                        Console.WriteLine($"[手動刷新] 開始刷新，下次可刷新時間: {_lastManualRefresh.AddSeconds(MANUAL_REFRESH_COOLDOWN):HH:mm:ss}");
+
+                        Task.Run(() =>
+                        {
+                                var currentTab = marketTabControl.Dispatcher.Invoke(() => marketTabControl.SelectedIndex);
+
+                                if (currentTab == 0)
+                                {
+                                        var tickers = _usStockManager.GetTickers();
+                                        Console.WriteLine($"[手動刷新] 美股：開始更新 {tickers.Count} 個股票");
+
+                                        for (int i = 0; i < tickers.Count; i++)
+                                        {
+                                                var ticker = tickers[i];
+                                                Console.WriteLine($"[手動刷新] 美股 [{i+1}/{tickers.Count}] 更新 {ticker}");
+
+                                                // 使用新方法：獲取價格和前收盤價
+                                                _usPriceFetcher.UpdatePriceWithPreviousClose(ticker);
+
+                                                // 添加請求間隔，避免頻率過高
+                                                if (i < tickers.Count - 1) // 最後一個不需要等待
+                                                {
+                                                        System.Threading.Thread.Sleep(600);
+                                                }
+                                        }
+
+                                        Console.WriteLine($"[手動刷新] 美股：完成更新 {tickers.Count} 個股票");
+                                }
+                                else
+                                {
+                                        var tickers = _twStockManager.GetTickers();
+                                        Console.WriteLine($"[手動刷新] 台股：開始更新 {tickers.Count} 個股票");
+
+                                        for (int i = 0; i < tickers.Count; i++)
+                                        {
+                                                var ticker = tickers[i];
+                                                Console.WriteLine($"[手動刷新] 台股 [{i+1}/{tickers.Count}] 更新 {ticker}");
+
+                                                // 使用新方法：獲取價格和前收盤價
+                                                _twPriceFetcher.UpdatePriceWithPreviousClose(ticker);
+
+                                                // 添加請求間隔，避免頻率過高
+                                                if (i < tickers.Count - 1)
+                                                {
+                                                        System.Threading.Thread.Sleep(600);
+                                                }
+                                        }
+
+                                        Console.WriteLine($"[手動刷新] 台股：完成更新 {tickers.Count} 個股票");
+                                }
+
+                                Dispatcher.Invoke(() =>
+                                {
+                                        UpdatePriceDisplay();
+                                        statusText.Text = "✅ 刷新完成";
+                                        Console.WriteLine($"[手動刷新] 刷新完成，下次可刷新時間: {DateTime.Now.AddSeconds(MANUAL_REFRESH_COOLDOWN):HH:mm:ss}");
+                                });
+                        });
+                }
+
+                private void TxtSearch_TextChanged(object sender, TextChangedEventArgs e)
+                {
+                        var textBox = sender as TextBox;
+                        var market = textBox?.Tag?.ToString();
+                        ApplyFilter(market);
+                }
+
+                private void ApplyFilter(string market)
+                {
+                        if (market == "US")
+                        {
+                                var searchText = txtUsSearch?.Text?.ToLower() ?? "";
+                                _usFilteredStockList.Clear();
+
+                                foreach (var stock in _usStockList)
+                                {
+                                        if (string.IsNullOrEmpty(searchText) ||
+                                                stock.Ticker.ToLower().Contains(searchText) ||
+                                                stock.Name.ToLower().Contains(searchText))
+                                        {
+                                                _usFilteredStockList.Add(stock);
+                                        }
+                                }
+                        }
+                        else if (market == "TW")
+                        {
+                                var searchText = txtTwSearch?.Text?.ToLower() ?? "";
+                                _twFilteredStockList.Clear();
+
+                                foreach (var stock in _twStockList)
+                                {
+                                        if (string.IsNullOrEmpty(searchText) ||
+                                                stock.Ticker.ToLower().Contains(searchText) ||
+                                                stock.Name.ToLower().Contains(searchText))
+                                        {
+                                                _twFilteredStockList.Add(stock);
+                                        }
+                                }
+                        }
+                }
+
+                private void MarketTabControl_SelectionChanged(object sender, SelectionChangedEventArgs e)
+                {
+                        _countdownSeconds = 0;
+                        _lastNewsUpdate = DateTime.MinValue;
+                        _ = UpdateNewsImpactAsync();
+                }
+
+                private void BtnTestNVDA_Click(object sender, RoutedEventArgs e)
+                {
+                        Console.WriteLine("\n");
+                        TestNVDA.Run();
+                        Console.WriteLine("\n");
+
+                        if (_debugWindow != null && _debugWindow.IsVisible)
+                        {
+                                MessageBox.Show("NVDA 診斷測試已完成！\n請查看調試視窗中的詳細輸出。", "測試完成", MessageBoxButton.OK, MessageBoxImage.Information);
+                        }
+                        else
+                        {
+                                MessageBox.Show("NVDA 診斷測試已完成！\n請開啟調試視窗（點擊 🐛 調試）查看結果。", "測試完成", MessageBoxButton.OK, MessageBoxImage.Information);
+                        }
+                }
+
+                private void BtnTestAPI_Click(object sender, RoutedEventArgs e)
+                {
+                        Console.WriteLine("\n");
+
+                        // 測試單個股票（NVDA）
+                        TestYahooFinance.TestConnection("NVDA");
+
+                        Console.WriteLine("\n");
+
+                        // 測試多個股票
+                        TestYahooFinance.TestMultipleStocks();
+
+                        Console.WriteLine("\n");
+
+                        // 🎯 新增：診斷 previousClose 為什麼是 null
+                        Console.WriteLine("\n");
+                        DiagnosePreviousClose.Run("NVDA");
+                        Console.WriteLine("\n");
+
+                        // 🐍 新增：測試 Python yfinance
+                        Console.WriteLine("\n");
+                        TestPythonYFinance.Run();
+                        Console.WriteLine("\n");
+
+                        if (_debugWindow != null && _debugWindow.IsVisible)
+                        {
+                                MessageBox.Show("API 測試已完成！\n\n包括:\n- Yahoo Finance V8/V7\n- Python yfinance\n- previousClose 診斷\n\n請查看調試視窗中的詳細輸出。", "測試完成", MessageBoxButton.OK, MessageBoxImage.Information);
+                        }
+                        else
+                        {
+                                MessageBox.Show("API 測試已完成！\n請開啟調試視窗（點擊 🐛 調試）查看結果。", "測試完成", MessageBoxButton.OK, MessageBoxImage.Information);
+                        }
+                }
+
+                private void DataGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+                {
+                        try
+                        {
+                                var dataGrid = sender as DataGrid;
+                                if (dataGrid?.SelectedItem is StockInfo selectedStock)
+                                {
+                                        Console.WriteLine($"[雙擊] 選中股票: {selectedStock.Ticker} - {selectedStock.Name}");
+
+                                        // 確定使用哪個市場的 PriceFetcher
+                                        var currentTab = marketTabControl.SelectedIndex;
+                                        var priceFetcher = currentTab == 0 ? _usPriceFetcher : _twPriceFetcher;
+
+                                        Console.WriteLine($"[雙擊] 使用 {(currentTab == 0 ? "美股" : "台股")} PriceFetcher");
+
+                                        // 打開趨勢分析視窗
+                                        try
+                                        {
+                                                var trendWindow = new TrendAnalysisWindow(
+                                                        selectedStock.Ticker,
+                                                        selectedStock.Name,
+                                                        priceFetcher
+                                                );
+                                                trendWindow.Owner = this;
+                                                Console.WriteLine($"[雙擊] 準備顯示趨勢視窗");
+                                                trendWindow.ShowDialog();
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                                Console.WriteLine($"[雙擊錯誤] 創建或顯示趨勢視窗時發生錯誤: {ex.Message}");
+                                                Console.WriteLine($"[雙擊錯誤] 堆疊追蹤: {ex.StackTrace}");
+
+                                                MessageBox.Show(
+                                                        $"無法開啟趨勢分析視窗\n\n錯誤信息：{ex.Message}\n\n請檢查調試視窗查看詳細信息",
+                                                        "錯誤",
+                                                        MessageBoxButton.OK,
+                                                        MessageBoxImage.Error
+                                                );
+                                        }
+                                }
+                                else
+                                {
+                                        Console.WriteLine("[雙擊] 未選中任何股票或選中項目不是 StockInfo");
+                                }
+                        }
+                        catch (Exception ex)
+                        {
+                                Console.WriteLine($"[雙擊外層錯誤] {ex.Message}");
+                                Console.WriteLine($"[雙擊外層錯誤] 堆疊追蹤: {ex.StackTrace}");
+
+                                MessageBox.Show(
+                                        $"處理雙擊事件時發生錯誤\n\n{ex.Message}",
+                                        "錯誤",
+                                        MessageBoxButton.OK,
+                                        MessageBoxImage.Error
+                                );
+                        }
+                }
+
+                private void BtnDebug_Click(object sender, RoutedEventArgs e)
+                {
+                        if (_debugWindow == null || !_debugWindow.IsLoaded)
+                        {
+                                _debugWindow = new DebugWindow();
+                                _debugWindow.Show();
+                        }
+                        else
+                        {
+                                _debugWindow.Activate();
+                        }
+                }
+
+                public void LogToDebugWindow(string message)
+                {
+                        try
+                        {
+                                // 確保在 UI 線程上執行
+                                if (!Dispatcher.CheckAccess())
+                                {
+                                        // 如果不在 UI 線程，使用 Dispatcher.BeginInvoke
+                                        Dispatcher.BeginInvoke(new Action(() => LogToDebugWindow(message)));
+                                        return;
+                                }
+
+                                // 在 UI 線程上執行
+                                if (_debugWindow != null && _debugWindow.IsLoaded)
+                                {
+                                        _debugWindow.AppendLog(message);
+                                }
+                        }
+                        catch (Exception ex)
+                        {
+                                // 靜默處理錯誤，避免影響主程式
+                                System.Diagnostics.Debug.WriteLine($"[LogToDebugWindow錯誤] {ex.Message}");
+                        }
+                }
+
+                protected override void OnClosed(EventArgs e)
+                {
+                        _usMonitor?.StopThreads();
+                        _twMonitor?.StopThreads();
+                        _updateTimer?.Stop();
+                        _countdownTimer?.Stop();
+                        _debugWindow?.Close();
+                        base.OnClosed(e);
+                }
+        }
+
+        public class NewsImpactItem
+        {
+                public string Time { get; set; }
+                public string Headline { get; set; }
+                public string Source { get; set; }
+                public int ImportanceScore { get; set; }
+                public string ImportanceLevel { get; set; }
+        }
+
+        // 用於重定向 Console 輸出到調試視窗的 TextWriter
+        public class DebugTextWriter : System.IO.TextWriter
+        {
+                private MainWindow _mainWindow;
+                private System.Text.StringBuilder _buffer;
+                private System.Threading.Timer _flushTimer;
+
+                public DebugTextWriter(MainWindow mainWindow)
+                {
+                        _mainWindow = mainWindow;
+                        _buffer = new System.Text.StringBuilder();
+
+                        // 使用定時器批次處理輸出，減少 Dispatcher 調用
+                        _flushTimer = new System.Threading.Timer(
+                                _ => FlushBuffer(),
+                                null,
+                                100, // 首次延遲 100ms
+                                100  // 之後每 100ms
+                        );
+                }
+
+                public override void WriteLine(string value)
+                {
+                        try
+                        {
+                                if (!string.IsNullOrEmpty(value))
+                                {
+                                        lock (_buffer)
+                                        {
+                                                _buffer.AppendLine(value);
+                                        }
+                                }
+                        }
+                        catch
+                        {
+                                // 靜默處理錯誤
+                        }
+                }
+
+                public override void Write(string value)
+                {
+                        // 暫存寫入，等待換行時一起輸出
+                        try
+                        {
+                                if (!string.IsNullOrEmpty(value))
+                                {
+                                        lock (_buffer)
+                                        {
+                                                _buffer.Append(value);
+                                        }
+                                }
+                        }
+                        catch
+                        {
+                                // 靜默處理錯誤
+                        }
+                }
+
+                private void FlushBuffer()
+                {
+                        try
+                        {
+                                string content = null;
+
+                                lock (_buffer)
+                                {
+                                        if (_buffer.Length > 0)
+                                        {
+                                                content = _buffer.ToString();
+                                                _buffer.Clear();
+                                        }
+                                }
+
+                                if (!string.IsNullOrEmpty(content))
+                                {
+                                        _mainWindow?.LogToDebugWindow(content.TrimEnd('\r', '\n'));
+                                }
+                        }
+                        catch
+                        {
+                                // 靜默處理錯誤
+                        }
+                }
+
+                public override System.Text.Encoding Encoding
+                {
+                        get { return System.Text.Encoding.UTF8; }
+                }
+
+                protected override void Dispose(bool disposing)
+                {
+                        if (disposing)
+                        {
+                                _flushTimer?.Dispose();
+                                FlushBuffer(); // 最後刷新一次
+                        }
+                        base.Dispose(disposing);
+                }
+        }
+}
