@@ -65,10 +65,31 @@ namespace StockManager.Config
                 public static readonly string IntrinioBaseUrl = "https://api-v2.intrinio.com";
 
                 // 🐍 Python yfinance 配置
-                // 需要安裝: pip install yfinance
                 public static readonly bool UsePythonYFinance = true; // ✅ 已啟用（主要數據源）
-                public static readonly string PythonPath = "python"; // Python 執行檔路徑 (或 "python3")
+                public static readonly string PythonPath = ResolvePythonPath();
                 public static readonly string YFinanceScriptPath = "Python\\yfinance_fetcher.py"; // yfinance 腳本路徑
+
+                private static string ResolvePythonPath()
+                {
+                        var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+
+                        // 安裝包內建 Python venv
+                        var bundledVenvPython = Path.Combine(baseDir, "PythonRuntime", "Scripts", "python.exe");
+                        if (File.Exists(bundledVenvPython))
+                        {
+                                return bundledVenvPython;
+                        }
+
+                        // 其他可能的相對路徑（開發環境）
+                        var localVenvPython = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "PythonRuntime", "Scripts", "python.exe"));
+                        if (File.Exists(localVenvPython))
+                        {
+                                return localVenvPython;
+                        }
+
+                        // 回退到系統 Python
+                        return "python";
+                }
 
                 public static bool TryLoadTaiwanSectorCsv(out List<string> sectorOrder, out Dictionary<string, string> tickerToSector)
                 {
