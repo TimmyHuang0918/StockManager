@@ -101,33 +101,35 @@ namespace StockManager.Services
                         {
                                 Console.WriteLine($"[Python yfinance] 🐍 嘗試獲取 {ticker} 的股價...");
 
+                                var exePath = ResolveYFinanceExecutablePath();
                                 // 構建 Python 腳本的完整路徑
                                 var scriptPath = ResolveYFinanceScriptPath();
                                 Console.WriteLine($"[Python yfinance] 腳本路徑: {scriptPath}");
+                                Console.WriteLine($"[Python yfinance] EXE 路徑: {exePath}");
                                 Console.WriteLine($"[Python yfinance] Python 命令: {AppConfig.PythonPath}");
 
-                                if (!File.Exists(scriptPath))
+                                var hasExe = File.Exists(exePath);
+                                var hasScript = File.Exists(scriptPath);
+
+                                if (!hasExe && !hasScript)
                                 {
-                                        Console.WriteLine($"[Python yfinance] ❌ 失敗原因: 腳本文件不存在");
+                                        Console.WriteLine($"[Python yfinance] ❌ 失敗原因: EXE 與腳本都不存在");
                                         Console.WriteLine($"[Python yfinance] 請確認文件存在: {scriptPath}");
                                         return Tuple.Create<double?, double?, string>(null, null, null);
                                 }
 
-                                Console.WriteLine($"[Python yfinance] ✅ 腳本文件存在");
+                                if (hasExe)
+                                {
+                                        Console.WriteLine($"[Python yfinance] ✅ 使用 PyInstaller EXE");
+                                }
+                                else
+                                {
+                                        Console.WriteLine($"[Python yfinance] ✅ 使用 Python 腳本");
+                                }
 
                                 // 配置 Python 進程
-                                var startInfo = new ProcessStartInfo
-                                {
-                                        FileName = AppConfig.PythonPath,
-                                        Arguments = $"\"{scriptPath}\" {ticker}",
-                                        UseShellExecute = false,
-                                        RedirectStandardOutput = true,
-                                        RedirectStandardError = true,
-                                        CreateNoWindow = true,
-                                        StandardOutputEncoding = System.Text.Encoding.UTF8
-                                };
-
-                                Console.WriteLine($"[Python yfinance] 執行命令: {AppConfig.PythonPath} \"{scriptPath}\" {ticker}");
+                                var startInfo = CreateYFinanceProcessStartInfo(ticker, exePath, scriptPath);
+                                Console.WriteLine($"[Python yfinance] 執行命令: {startInfo.FileName} {startInfo.Arguments}");
 
                                 using (var process = new Process { StartInfo = startInfo })
                                 {
@@ -845,23 +847,15 @@ namespace StockManager.Services
                 {
                         try
                         {
+                                var exePath = ResolveYFinanceExecutablePath();
                                 var scriptPath = ResolveYFinanceScriptPath();
 
-                                if (!File.Exists(scriptPath))
+                                if (!File.Exists(exePath) && !File.Exists(scriptPath))
                                 {
                                         return false;
                                 }
 
-                                var startInfo = new ProcessStartInfo
-                                {
-                                        FileName = AppConfig.PythonPath,
-                                        Arguments = $"\"{scriptPath}\" {ticker}",
-                                        UseShellExecute = false,
-                                        RedirectStandardOutput = true,
-                                        RedirectStandardError = true,
-                                        CreateNoWindow = true,
-                                        StandardOutputEncoding = System.Text.Encoding.UTF8
-                                };
+                                var startInfo = CreateYFinanceProcessStartInfo(ticker, exePath, scriptPath);
 
                                 using (var process = new Process { StartInfo = startInfo })
                                 {
@@ -902,6 +896,61 @@ namespace StockManager.Services
                         }
 
                         return false;
+                }
+
+                /// <summary>
+                /// 建立 yfinance 子程序啟動資訊（優先使用 PyInstaller EXE）
+                /// </summary>
+                private ProcessStartInfo CreateYFinanceProcessStartInfo(string ticker, string exePath, string scriptPath)
+                {
+                        if (File.Exists(exePath))
+                        {
+                                return new ProcessStartInfo
+                                {
+                                        FileName = exePath,
+                                        Arguments = ticker,
+                                        UseShellExecute = false,
+                                        RedirectStandardOutput = true,
+                                        RedirectStandardError = true,
+                                        CreateNoWindow = true,
+                                        StandardOutputEncoding = System.Text.Encoding.UTF8
+                                };
+                        }
+
+                        return new ProcessStartInfo
+                        {
+                                FileName = AppConfig.PythonPath,
+                                Arguments = $"\"{scriptPath}\" {ticker}",
+                                UseShellExecute = false,
+                                RedirectStandardOutput = true,
+                                RedirectStandardError = true,
+                                CreateNoWindow = true,
+                                StandardOutputEncoding = System.Text.Encoding.UTF8
+                        };
+                }
+
+                /// <summary>
+                /// 解析 yfinance EXE 路徑（PyInstaller onefile 產物）。
+                /// </summary>
+                private string ResolveYFinanceExecutablePath()
+                {
+                        var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+
+                        // 1) 安裝/輸出目錄：Python\yfinance_fetcher.exe
+                        var outputPath = Path.Combine(baseDir, "Python", "yfinance_fetcher.exe");
+                        if (File.Exists(outputPath))
+                        {
+                                return outputPath;
+                        }
+
+                        // 2) 專案目錄：..\..\Python\dist\yfinance_fetcher.exe
+                        var projectDistPath = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "Python", "dist", "yfinance_fetcher.exe"));
+                        if (File.Exists(projectDistPath))
+                        {
+                                return projectDistPath;
+                        }
+
+                        return outputPath;
                 }
 
                 /// <summary>

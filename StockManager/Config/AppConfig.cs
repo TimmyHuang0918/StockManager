@@ -71,6 +71,21 @@ namespace StockManager.Config
 
                 private static string ResolvePythonPath()
                 {
+                        // 最高優先：環境變數覆寫（方便不同機器直接切換）
+                        var envPython = Environment.GetEnvironmentVariable("STOCKMANAGER_PYTHON");
+                        if (!string.IsNullOrWhiteSpace(envPython))
+                        {
+                                var candidate = envPython.Trim().Trim('"');
+
+                                // 可接受完整路徑，或直接給命令名稱（例如 python / py）
+                                if (string.Equals(candidate, "python", StringComparison.OrdinalIgnoreCase) ||
+                                        string.Equals(candidate, "py", StringComparison.OrdinalIgnoreCase) ||
+                                        File.Exists(candidate))
+                                {
+                                        return candidate;
+                                }
+                        }
+
                         var baseDir = AppDomain.CurrentDomain.BaseDirectory;
 
                         // 安裝包內建 Python venv

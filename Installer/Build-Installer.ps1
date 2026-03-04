@@ -41,8 +41,26 @@ function Get-PythonCommand {
     throw "Cannot find Python. Please install Python 3.x (recommended 3.10+)."
 }
 
+function Get-MSBuildPath {
+    $cmd = Get-Command msbuild -ErrorAction SilentlyContinue
+    if ($cmd) {
+        return $cmd.Source
+    }
+
+    $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+    if (Test-Path $vsWhere) {
+        $found = & $vsWhere -latest -products * -requires Microsoft.Component.MSBuild -find "MSBuild\**\Bin\MSBuild.exe" | Select-Object -First 1
+        if ($found -and (Test-Path $found)) {
+            return $found
+        }
+    }
+
+    throw "Cannot find MSBuild. Please run in Developer PowerShell or install Visual Studio Build Tools."
+}
+
 Write-Host "[1/5] Building StockManager ($Configuration)..." -ForegroundColor Cyan
-& msbuild $projectPath /t:Build /p:Configuration=$Configuration /p:Platform=$Platform
+$msbuildPath = Get-MSBuildPath
+& $msbuildPath $projectPath /t:Build /p:Configuration=$Configuration /p:Platform=$Platform
 
 if (-not (Test-Path (Join-Path $outputDir "StockManager.exe"))) {
     throw "Build failed: StockManager.exe was not found in output folder ($outputDir)."
@@ -57,9 +75,7 @@ New-Item -ItemType Directory -Path $stagingDir | Out-Null
 Write-Host "[3/5] Copying app files to staging..." -ForegroundColor Cyan
 Copy-Item (Join-Path $outputDir "*") $stagingDir -Recurse -Force
 
-$pythonRuntimeDir = Join-Path $stagingDir "PythonRuntime"
 $pythonScriptDir = Join-Path $stagingDir "Python"
-New-Item -ItemType Directory -Path $pythonRuntimeDir -Force | Out-Null
 New-Item -ItemType Directory -Path $pythonScriptDir -Force | Out-Null
 
 Copy-Item (Join-Path $projectDir "Python\*.py") $pythonScriptDir -Force
@@ -67,23 +83,52 @@ if (Test-Path (Join-Path $projectDir "Python\requirements.txt")) {
     Copy-Item (Join-Path $projectDir "Python\requirements.txt") $pythonScriptDir -Force
 }
 
-Write-Host "[4/5] Creating Python runtime and installing packages..." -ForegroundColor Cyan
+Write-Host "[4/5] Building yfinance_fetcher.exe with PyInstaller..." -ForegroundColor Cyan
 $pythonCmd = Get-PythonCommand
 
+$pyBuildDir = Join-Path $scriptDir "pybuild"
+if (Test-Path $pyBuildDir) {
+    Remove-Item $pyBuildDir -Recurse -Force
+}
+New-Item -ItemType Directory -Path $pyBuildDir | Out-Null
+
+$pyBuildVenv = Join-Path $pyBuildDir "venv"
 if ($pythonCmd -eq "py") {
-    & py -3 -m venv $pythonRuntimeDir
+    & py -3 -m venv $pyBuildVenv
 } else {
-    & python -m venv $pythonRuntimeDir
+    & python -m venv $pyBuildVenv
 }
 
-$venvPython = Join-Path $pythonRuntimeDir "Scripts\python.exe"
+$venvPython = Join-Path $pyBuildVenv "Scripts\python.exe"
 if (-not (Test-Path $venvPython)) {
     throw "Virtual environment creation failed: $venvPython not found."
 }
 
 & $venvPython -m pip install --upgrade pip
-if (Test-Path (Join-Path $pythonScriptDir "requirements.txt")) {
-    & $venvPython -m pip install -r (Join-Path $pythonScriptDir "requirements.txt")
+if (Test-Path (Join-Path $projectDir "Python\requirements.txt")) {
+    & $venvPython -m pip install -r (Join-Path $projectDir "Python\requirements.txt")
+}
+& $venvPython -m pip install pyinstaller
+
+$entryScript = Join-Path $projectDir "Python\yfinance_fetcher.py"
+if (-not (Test-Path $entryScript)) {
+    throw "Cannot find yfinance_fetcher.py: $entryScript"
+}
+
+& $venvPython -m PyInstaller --noconfirm --clean --onefile --name yfinance_fetcher `
+    --distpath $pythonScriptDir `
+    --workpath (Join-Path $pyBuildDir "work") `
+    --specpath (Join-Path $pyBuildDir "spec") `
+    $entryScript
+
+$builtExe = Join-Path $pythonScriptDir "yfinance_fetcher.exe"
+if (-not (Test-Path $builtExe)) {
+    throw "PyInstaller build failed: $builtExe not found."
+}
+
+# 清理建置暫存
+if (Test-Path $pyBuildDir) {
+    Remove-Item $pyBuildDir -Recurse -Force
 }
 
 Write-Host "[5/5] Building installer..." -ForegroundColor Cyan
