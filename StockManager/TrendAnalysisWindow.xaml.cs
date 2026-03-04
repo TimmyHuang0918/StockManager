@@ -1876,22 +1876,21 @@ namespace StockManager
                 {
                         try
                         {
-                                var scriptPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, AppConfig.YFinanceScriptPath);
-                                if (!File.Exists(scriptPath))
-                                {
-                                        scriptPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", AppConfig.YFinanceScriptPath));
-                                }
+                                var exePath = ResolveYFinanceExecutablePath();
+                                var scriptPath = ResolveYFinanceScriptPath();
 
-                                if (!File.Exists(scriptPath))
+                                var hasExe = File.Exists(exePath);
+                                var hasScript = File.Exists(scriptPath);
+                                if (!hasExe && !hasScript)
                                 {
-                                        Console.WriteLine($"[趨勢視窗] 找不到 yfinance 腳本: {scriptPath}");
+                                        Console.WriteLine($"[趨勢視窗] 找不到 yfinance 執行檔或腳本。EXE={exePath}, Script={scriptPath}");
                                         return false;
                                 }
 
                                 var startInfo = new ProcessStartInfo
                                 {
-                                        FileName = AppConfig.PythonPath,
-                                        Arguments = $"\"{scriptPath}\" {ticker} history {period}",
+                                        FileName = hasExe ? exePath : AppConfig.PythonPath,
+                                        Arguments = hasExe ? $"{ticker} history {period}" : $"\"{scriptPath}\" {ticker} history {period}",
                                         UseShellExecute = false,
                                         RedirectStandardOutput = true,
                                         RedirectStandardError = true,
@@ -1965,6 +1964,44 @@ namespace StockManager
                                 Console.WriteLine($"[趨勢視窗] 讀取 yfinance 歷史資料失敗: {ex.Message}");
                                 return false;
                         }
+                }
+
+                private string ResolveYFinanceExecutablePath()
+                {
+                        var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+
+                        var outputPath = System.IO.Path.Combine(baseDir, "Python", "yfinance_fetcher.exe");
+                        if (File.Exists(outputPath))
+                        {
+                                return outputPath;
+                        }
+
+                        var projectDistPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(baseDir, "..", "..", "Python", "dist", "yfinance_fetcher.exe"));
+                        if (File.Exists(projectDistPath))
+                        {
+                                return projectDistPath;
+                        }
+
+                        return outputPath;
+                }
+
+                private string ResolveYFinanceScriptPath()
+                {
+                        var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+
+                        var outputPath = System.IO.Path.Combine(baseDir, AppConfig.YFinanceScriptPath);
+                        if (File.Exists(outputPath))
+                        {
+                                return outputPath;
+                        }
+
+                        var projectPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(baseDir, "..", "..", AppConfig.YFinanceScriptPath));
+                        if (File.Exists(projectPath))
+                        {
+                                return projectPath;
+                        }
+
+                        return outputPath;
                 }
 
                 private void UpdateFundamentalAnalysis()
