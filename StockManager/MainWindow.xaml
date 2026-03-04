@@ -30,10 +30,12 @@
                                         Background="#E74C3C" Foreground="White" FontWeight="Bold" BorderThickness="0" Cursor="Hand"/>
                         <Button x:Name="btnRefresh" Content="🔄 刷新" Width="80" Height="30" Margin="10,0" Click="BtnRefresh_Click"
                                         Background="#3498DB" Foreground="White" FontWeight="Bold" BorderThickness="0" Cursor="Hand"/>
-                        <Button x:Name="btnDebug" Content="🐛 調試" Width="80" Height="30" Margin="10,0" Click="BtnDebug_Click"
-                                        Background="#9B59B6" Foreground="White" FontWeight="Bold" BorderThickness="0" Cursor="Hand"/>
-                        <Button x:Name="btnTestAPI" Content="🌐 測試API" Width="100" Height="30" Margin="10,0" Click="BtnTestAPI_Click"
-                                        Background="#16A085" Foreground="White" FontWeight="Bold" BorderThickness="0" Cursor="Hand"/>
+                        <TextBlock Text="庫存使用者:" Foreground="White" VerticalAlignment="Center" Margin="20,0,8,0"/>
+                        <ComboBox x:Name="cboHoldingUser" Width="140" Height="28" SelectionChanged="CboHoldingUser_SelectionChanged"/>
+                        <Button x:Name="btnAddHoldingUser" Content="+新增使用者" Width="100" Height="30" Margin="8,0,0,0"
+                                        Click="BtnAddHoldingUser_Click" Background="#546E7A" Foreground="White" FontWeight="Bold" BorderThickness="0" Cursor="Hand"/>
+                        <Button x:Name="btnDeleteHoldingUser" Content="刪除使用者" Width="96" Height="30" Margin="8,0,0,0"
+                                        Click="BtnDeleteHoldingUser_Click" Background="#8D6E63" Foreground="White" FontWeight="Bold" BorderThickness="0" Cursor="Hand"/>
                         </StackPanel>
                 </Border>
 
@@ -57,50 +59,125 @@
                                                 </StackPanel>
                                         </Border>
 
-                                        <!-- 美股列表 -->
-                                        <DataGrid Grid.Row="1" x:Name="dgUsStocks" AutoGenerateColumns="False" 
-                                                        IsReadOnly="True" Margin="10" CanUserAddRows="False"
-                                                        AlternatingRowBackground="#F8F9FA" GridLinesVisibility="Horizontal"
-                                                        HeadersVisibility="Column" FontSize="12" SelectionMode="Single"
-                                                        MouseDoubleClick="DataGrid_MouseDoubleClick">
-                                                <DataGrid.Columns>
-                                                        <DataGridTextColumn Header="股票代號" Binding="{Binding Ticker}" Width="100" FontWeight="Bold"/>
-                                                        <DataGridTextColumn Header="公司名稱" Binding="{Binding Name}" Width="150"/>
-                                                        <DataGridTextColumn Header="目前價格" Binding="{Binding Price, StringFormat={}{0:F2}}" Width="100"/>
-                                                        <DataGridTextColumn Header="前日收盤" Binding="{Binding PreviousClose, StringFormat={}{0:F2}}" Width="100"/>
-                                                        <DataGridTemplateColumn Header="漲跌幅 (%)" Width="120">
-                                                                <DataGridTemplateColumn.CellTemplate>
-                                                                        <DataTemplate>
-                                                                                <TextBlock>
-                                                                                        <TextBlock.Style>
-                                                                                                <Style TargetType="TextBlock">
-                                                                                                        <Setter Property="Text" Value="{Binding ChangePercent, StringFormat={}{0:F2}%}"/>
-                                                                                                        <Setter Property="FontWeight" Value="Bold"/>
-                                                                                                        <Style.Triggers>
-                                                                                                                <DataTrigger Binding="{Binding ChangePercent, Converter={StaticResource PositiveNegativeConverter}}" Value="Positive">
-                                                                                                                        <Setter Property="Foreground" Value="#27AE60"/>
-                                                                                                                        <Setter Property="Text" Value="{Binding ChangePercent, StringFormat={}▲ {0:F2}%}"/>
-                                                                                                                </DataTrigger>
-                                                                                                                <DataTrigger Binding="{Binding ChangePercent, Converter={StaticResource PositiveNegativeConverter}}" Value="Negative">
-                                                                                                                        <Setter Property="Foreground" Value="#E74C3C"/>
-                                                                                                                        <Setter Property="Text" Value="{Binding ChangePercent, StringFormat={}▼ {0:F2}%}"/>
-                                                                                                                </DataTrigger>
-                                                                                                                <DataTrigger Binding="{Binding ChangePercent}" Value="{x:Null}">
-                                                                                                                        <Setter Property="Foreground" Value="Gray"/>
-                                                                                                                        <Setter Property="Text" Value="--"/>
-                                                                                                                        <Setter Property="FontWeight" Value="Normal"/>
-                                                                                                                </DataTrigger>
-                                                                                                        </Style.Triggers>
-                                                                                                </Style>
-                                                                                        </TextBlock.Style>
-                                                                                </TextBlock>
-                                                                        </DataTemplate>
-                                                                </DataGridTemplateColumn.CellTemplate>
-                                                        </DataGridTemplateColumn>
-                                                        <DataGridTextColumn Header="資料來源" Binding="{Binding Source}" Width="120"/>
-                                                        <DataGridTextColumn Header="更新時間" Binding="{Binding UpdatedAt, StringFormat={}{0:HH:mm:ss}}" Width="100"/>
-                                                </DataGrid.Columns>
-                                        </DataGrid>
+                                        <TabControl Grid.Row="1" Margin="10">
+                                                <TabItem Header="股價列表">
+                                                        <DataGrid x:Name="dgUsStocks" AutoGenerateColumns="False"
+                                                                IsReadOnly="True" CanUserAddRows="False"
+                                                                AlternatingRowBackground="#F8F9FA" GridLinesVisibility="Horizontal"
+                                                                HeadersVisibility="Column" FontSize="12" SelectionMode="Single"
+                                                                MouseDoubleClick="DataGrid_MouseDoubleClick">
+                                                        <DataGrid.Columns>
+                                                                <DataGridTextColumn Header="股票代號" Binding="{Binding Ticker}" Width="100" FontWeight="Bold"/>
+                                                                <DataGridTextColumn Header="公司名稱" Binding="{Binding Name}" Width="150"/>
+                                                                <DataGridTextColumn Header="目前價格" Binding="{Binding Price, StringFormat={}{0:F2}}" Width="100"/>
+                                                                <DataGridTextColumn Header="前日收盤" Binding="{Binding PreviousClose, StringFormat={}{0:F2}}" Width="100"/>
+                                                                <DataGridTemplateColumn Header="漲跌幅 (%)" Width="120">
+                                                                        <DataGridTemplateColumn.CellTemplate>
+                                                                                <DataTemplate>
+                                                                                        <TextBlock>
+                                                                                                <TextBlock.Style>
+                                                                                                        <Style TargetType="TextBlock">
+                                                                                                                <Setter Property="Text" Value="{Binding ChangePercent, StringFormat={}{0:F2}%}"/>
+                                                                                                                <Setter Property="FontWeight" Value="Bold"/>
+                                                                                                                <Style.Triggers>
+                                                                                                                        <DataTrigger Binding="{Binding ChangePercent, Converter={StaticResource PositiveNegativeConverter}}" Value="Positive">
+                                                                                                                                <Setter Property="Foreground" Value="#27AE60"/>
+                                                                                                                                <Setter Property="Text" Value="{Binding ChangePercent, StringFormat={}▲ {0:F2}%}"/>
+                                                                                                                        </DataTrigger>
+                                                                                                                        <DataTrigger Binding="{Binding ChangePercent, Converter={StaticResource PositiveNegativeConverter}}" Value="Negative">
+                                                                                                                                <Setter Property="Foreground" Value="#E74C3C"/>
+                                                                                                                                <Setter Property="Text" Value="{Binding ChangePercent, StringFormat={}▼ {0:F2}%}"/>
+                                                                                                                        </DataTrigger>
+                                                                                                                        <DataTrigger Binding="{Binding ChangePercent}" Value="{x:Null}">
+                                                                                                                                <Setter Property="Foreground" Value="Gray"/>
+                                                                                                                                <Setter Property="Text" Value="--"/>
+                                                                                                                                <Setter Property="FontWeight" Value="Normal"/>
+                                                                                                                        </DataTrigger>
+                                                                                                                </Style.Triggers>
+                                                                                                        </Style>
+                                                                                                </TextBlock.Style>
+                                                                                        </TextBlock>
+                                                                                </DataTemplate>
+                                                                        </DataGridTemplateColumn.CellTemplate>
+                                                                </DataGridTemplateColumn>
+                                                                <DataGridTextColumn Header="資料來源" Binding="{Binding Source}" Width="120"/>
+                                                                <DataGridTextColumn Header="更新時間" Binding="{Binding UpdatedAt, StringFormat={}{0:HH:mm:ss}}" Width="100"/>
+                                                        </DataGrid.Columns>
+                                                        </DataGrid>
+                                                </TabItem>
+
+                                                <TabItem Header="庫存">
+                                                        <Border Background="#FAFAFA" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="6" Padding="10">
+                                                        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+                                                                <StackPanel MinWidth="500">
+                                                                        <TextBlock Text="📒 我的美股庫存" FontSize="13" FontWeight="Bold" Foreground="#2C3E50" Margin="0,0,0,8"/>
+
+                                                                        <Grid>
+                                                                                <Grid.ColumnDefinitions>
+                                                                                        <ColumnDefinition Width="*"/>
+                                                                                        <ColumnDefinition Width="300"/>
+                                                                                </Grid.ColumnDefinitions>
+
+                                                                                <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                                                                                        <WrapPanel Margin="0,0,0,8">
+                                                                                                <TextBlock Text="代號" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                                                                <TextBox x:Name="txtUsHoldingTicker" Width="100" Height="26" VerticalContentAlignment="Center" Margin="0,0,8,0"/>
+
+                                                                                                <TextBlock Text="股數" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                                                                <TextBox x:Name="txtUsHoldingQty" Width="80" Height="26" VerticalContentAlignment="Center" Margin="0,0,8,0"/>
+
+                                                                                                <TextBlock Text="均價" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                                                                <TextBox x:Name="txtUsHoldingCost" Width="80" Height="26" VerticalContentAlignment="Center" Margin="0,0,8,0"/>
+
+                                                                                                <Button x:Name="btnUsAddHolding" Content="新增" Width="60" Height="26" Margin="0,0,6,0"
+                                                                                                                Click="BtnUsAddHolding_Click" Background="#27AE60" Foreground="White" BorderThickness="0"/>
+                                                                                                <Button x:Name="btnUsUpdateHolding" Content="修改" Width="60" Height="26" Margin="0,0,6,0"
+                                                                                                                Click="BtnUsUpdateHolding_Click" Background="#F39C12" Foreground="White" BorderThickness="0"/>
+                                                                                                <Button x:Name="btnUsRemoveHolding" Content="移除" Width="60" Height="26" Margin="0,0,6,0"
+                                                                                                                Click="BtnUsRemoveHolding_Click" Background="#E74C3C" Foreground="White" BorderThickness="0"/>
+                                                                                                <Button x:Name="btnUsResetHoldings" Content="重置" Width="60" Height="26"
+                                                                                                                Click="BtnUsResetHoldings_Click" Background="#616161" Foreground="White" BorderThickness="0"/>
+                                                                                        </WrapPanel>
+
+                                                                                        <WrapPanel Margin="0,0,0,8">
+                                                                                                <TextBlock Text="賣出股數" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                                                                <TextBox x:Name="txtUsSellQty" Width="90" Height="26" VerticalContentAlignment="Center" Margin="0,0,8,0"/>
+                                                                                                <TextBlock Text="賣出價格" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                                                                <TextBox x:Name="txtUsSellPrice" Width="90" Height="26" VerticalContentAlignment="Center" Margin="0,0,8,0"/>
+                                                                                                <Button x:Name="btnUsSellHolding" Content="賣出" Width="70" Height="26"
+                                                                                                                Click="BtnUsSellHolding_Click" Background="#8E44AD" Foreground="White" BorderThickness="0"/>
+                                                                                        </WrapPanel>
+
+                                                                                        <DataGrid x:Name="dgUsHoldings" AutoGenerateColumns="False" IsReadOnly="True" Height="240"
+                                                                                                        CanUserAddRows="False" AlternatingRowBackground="#F8F9FA" GridLinesVisibility="Horizontal"
+                                                                                                        HeadersVisibility="Column" FontSize="12" SelectionMode="Single"
+                                                                                                        SelectionChanged="DgUsHoldings_SelectionChanged">
+                                                                                                <DataGrid.Columns>
+                                                                                                        <DataGridTextColumn Header="代號" Binding="{Binding Ticker}" Width="80"/>
+                                                                                                        <DataGridTextColumn Header="名稱" Binding="{Binding Name}" Width="120"/>
+                                                                                                        <DataGridTextColumn Header="股數" Binding="{Binding Quantity, StringFormat={}{0:F2}}" Width="80"/>
+                                                                                                        <DataGridTextColumn Header="均價" Binding="{Binding AverageCost, StringFormat={}{0:F2}}" Width="80"/>
+                                                                                                        <DataGridTextColumn Header="現價" Binding="{Binding CurrentPrice, StringFormat={}{0:F2}}" Width="80"/>
+                                                                                                        <DataGridTextColumn Header="市值" Binding="{Binding MarketValue, StringFormat={}{0:F2}}" Width="90"/>
+                                                                                                        <DataGridTextColumn Header="總損益" Binding="{Binding UnrealizedPnL, StringFormat={}{0:F2}}" Width="90"/>
+                                                                                                        <DataGridTextColumn Header="損益(%)" Binding="{Binding PnLPercent, StringFormat={}{0:F2}%}" Width="90"/>
+                                                                                                </DataGrid.Columns>
+                                                                                        </DataGrid>
+                                                                                </StackPanel>
+
+                                                                                <Border Grid.Column="1" Background="#F3F5F7" BorderBrush="#DADFE6" BorderThickness="1" CornerRadius="6" Padding="10">
+                                                                                        <StackPanel>
+                                                                                                <TextBlock Text="損益總覽" FontWeight="Bold" Foreground="#2C3E50" Margin="0,0,0,8"/>
+                                                                                                <TextBlock x:Name="txtUsTotalPnL" Text="美股未實現：0.00 (0.00%)" FontWeight="Bold" Foreground="#2C3E50" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                                                                                                <TextBlock x:Name="txtUsRealizedPnL" Text="美股已實現：0.00" FontWeight="Bold" Foreground="#2C3E50" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                                                                                        </StackPanel>
+                                                                                </Border>
+                                                                        </Grid>
+                                                                </StackPanel>
+                                                        </ScrollViewer>
+                                                        </Border>
+                                                </TabItem>
+                                        </TabControl>
                                 </Grid>
                         </TabItem>
 
@@ -125,50 +202,125 @@
                                                 </StackPanel>
                                         </Border>
 
-                                        <!-- 台股列表 -->
-                                        <DataGrid Grid.Row="1" x:Name="dgTwStocks" AutoGenerateColumns="False" 
-                                                        IsReadOnly="True" Margin="10" CanUserAddRows="False"
-                                                        AlternatingRowBackground="#F8F9FA" GridLinesVisibility="Horizontal"
-                                                        HeadersVisibility="Column" FontSize="12" SelectionMode="Single"
-                                                        MouseDoubleClick="DataGrid_MouseDoubleClick">
-                                                <DataGrid.Columns>
-                                                        <DataGridTextColumn Header="股票代號" Binding="{Binding Ticker}" Width="100" FontWeight="Bold"/>
-                                                        <DataGridTextColumn Header="公司名稱" Binding="{Binding Name}" Width="150"/>
-                                                        <DataGridTextColumn Header="目前價格" Binding="{Binding Price, StringFormat={}{0:F2}}" Width="100"/>
-                                                        <DataGridTextColumn Header="前日收盤" Binding="{Binding PreviousClose, StringFormat={}{0:F2}}" Width="100"/>
-                                                        <DataGridTemplateColumn Header="漲跌幅 (%)" Width="120">
-                                                                <DataGridTemplateColumn.CellTemplate>
-                                                                        <DataTemplate>
-                                                                                <TextBlock>
-                                                                                        <TextBlock.Style>
-                                                                                                <Style TargetType="TextBlock">
-                                                                                                        <Setter Property="Text" Value="{Binding ChangePercent, StringFormat={}{0:F2}%}"/>
-                                                                                                        <Setter Property="FontWeight" Value="Bold"/>
-                                                                                                        <Style.Triggers>
-                                                                                                                <DataTrigger Binding="{Binding ChangePercent, Converter={StaticResource PositiveNegativeConverter}}" Value="Positive">
-                                                                                                                        <Setter Property="Foreground" Value="#27AE60"/>
-                                                                                                                        <Setter Property="Text" Value="{Binding ChangePercent, StringFormat={}▲ {0:F2}%}"/>
-                                                                                                                </DataTrigger>
-                                                                                                                <DataTrigger Binding="{Binding ChangePercent, Converter={StaticResource PositiveNegativeConverter}}" Value="Negative">
-                                                                                                                        <Setter Property="Foreground" Value="#E74C3C"/>
-                                                                                                                        <Setter Property="Text" Value="{Binding ChangePercent, StringFormat={}▼ {0:F2}%}"/>
-                                                                                                                </DataTrigger>
-                                                                                                                <DataTrigger Binding="{Binding ChangePercent}" Value="{x:Null}">
-                                                                                                                        <Setter Property="Foreground" Value="Gray"/>
-                                                                                                                        <Setter Property="Text" Value="--"/>
-                                                                                                                        <Setter Property="FontWeight" Value="Normal"/>
-                                                                                                                </DataTrigger>
-                                                                                                        </Style.Triggers>
-                                                                                                </Style>
-                                                                                        </TextBlock.Style>
-                                                                                </TextBlock>
-                                                                        </DataTemplate>
-                                                                </DataGridTemplateColumn.CellTemplate>
-                                                        </DataGridTemplateColumn>
-                                                        <DataGridTextColumn Header="資料來源" Binding="{Binding Source}" Width="120"/>
-                                                        <DataGridTextColumn Header="更新時間" Binding="{Binding UpdatedAt, StringFormat={}{0:HH:mm:ss}}" Width="100"/>
-                                                </DataGrid.Columns>
-                                        </DataGrid>
+                                        <TabControl Grid.Row="1" Margin="10">
+                                                <TabItem Header="股價列表">
+                                                        <DataGrid x:Name="dgTwStocks" AutoGenerateColumns="False"
+                                                                IsReadOnly="True" CanUserAddRows="False"
+                                                                AlternatingRowBackground="#F8F9FA" GridLinesVisibility="Horizontal"
+                                                                HeadersVisibility="Column" FontSize="12" SelectionMode="Single"
+                                                                MouseDoubleClick="DataGrid_MouseDoubleClick">
+                                                        <DataGrid.Columns>
+                                                                <DataGridTextColumn Header="股票代號" Binding="{Binding Ticker}" Width="100" FontWeight="Bold"/>
+                                                                <DataGridTextColumn Header="公司名稱" Binding="{Binding Name}" Width="150"/>
+                                                                <DataGridTextColumn Header="目前價格" Binding="{Binding Price, StringFormat={}{0:F2}}" Width="100"/>
+                                                                <DataGridTextColumn Header="前日收盤" Binding="{Binding PreviousClose, StringFormat={}{0:F2}}" Width="100"/>
+                                                                <DataGridTemplateColumn Header="漲跌幅 (%)" Width="120">
+                                                                        <DataGridTemplateColumn.CellTemplate>
+                                                                                <DataTemplate>
+                                                                                        <TextBlock>
+                                                                                                <TextBlock.Style>
+                                                                                                        <Style TargetType="TextBlock">
+                                                                                                                <Setter Property="Text" Value="{Binding ChangePercent, StringFormat={}{0:F2}%}"/>
+                                                                                                                <Setter Property="FontWeight" Value="Bold"/>
+                                                                                                                <Style.Triggers>
+                                                                                                                        <DataTrigger Binding="{Binding ChangePercent, Converter={StaticResource PositiveNegativeConverter}}" Value="Positive">
+                                                                                                                                <Setter Property="Foreground" Value="#27AE60"/>
+                                                                                                                                <Setter Property="Text" Value="{Binding ChangePercent, StringFormat={}▲ {0:F2}%}"/>
+                                                                                                                        </DataTrigger>
+                                                                                                                        <DataTrigger Binding="{Binding ChangePercent, Converter={StaticResource PositiveNegativeConverter}}" Value="Negative">
+                                                                                                                                <Setter Property="Foreground" Value="#E74C3C"/>
+                                                                                                                                <Setter Property="Text" Value="{Binding ChangePercent, StringFormat={}▼ {0:F2}%}"/>
+                                                                                                                        </DataTrigger>
+                                                                                                                        <DataTrigger Binding="{Binding ChangePercent}" Value="{x:Null}">
+                                                                                                                                <Setter Property="Foreground" Value="Gray"/>
+                                                                                                                                <Setter Property="Text" Value="--"/>
+                                                                                                                                <Setter Property="FontWeight" Value="Normal"/>
+                                                                                                                        </DataTrigger>
+                                                                                                                </Style.Triggers>
+                                                                                                        </Style>
+                                                                                                </TextBlock.Style>
+                                                                                        </TextBlock>
+                                                                                </DataTemplate>
+                                                                        </DataGridTemplateColumn.CellTemplate>
+                                                                </DataGridTemplateColumn>
+                                                                <DataGridTextColumn Header="資料來源" Binding="{Binding Source}" Width="120"/>
+                                                                <DataGridTextColumn Header="更新時間" Binding="{Binding UpdatedAt, StringFormat={}{0:HH:mm:ss}}" Width="100"/>
+                                                        </DataGrid.Columns>
+                                                        </DataGrid>
+                                                </TabItem>
+
+                                                <TabItem Header="庫存">
+                                                        <Border Background="#FAFAFA" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="6" Padding="10">
+                                                        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+                                                                <StackPanel MinWidth="500">
+                                                                        <TextBlock Text="📒 我的台股庫存" FontSize="13" FontWeight="Bold" Foreground="#2C3E50" Margin="0,0,0,8"/>
+
+                                                                        <Grid>
+                                                                                <Grid.ColumnDefinitions>
+                                                                                        <ColumnDefinition Width="*"/>
+                                                                                        <ColumnDefinition Width="220"/>
+                                                                                </Grid.ColumnDefinitions>
+
+                                                                                <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                                                                                        <WrapPanel Margin="0,0,0,8">
+                                                                                                <TextBlock Text="代號" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                                                                <TextBox x:Name="txtTwHoldingTicker" Width="100" Height="26" VerticalContentAlignment="Center" Margin="0,0,8,0"/>
+
+                                                                                                <TextBlock Text="股數" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                                                                <TextBox x:Name="txtTwHoldingQty" Width="80" Height="26" VerticalContentAlignment="Center" Margin="0,0,8,0"/>
+
+                                                                                                <TextBlock Text="均價" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                                                                <TextBox x:Name="txtTwHoldingCost" Width="80" Height="26" VerticalContentAlignment="Center" Margin="0,0,8,0"/>
+
+                                                                                                <Button x:Name="btnTwAddHolding" Content="新增" Width="60" Height="26" Margin="0,0,6,0"
+                                                                                                                Click="BtnTwAddHolding_Click" Background="#27AE60" Foreground="White" BorderThickness="0"/>
+                                                                                                <Button x:Name="btnTwUpdateHolding" Content="修改" Width="60" Height="26" Margin="0,0,6,0"
+                                                                                                                Click="BtnTwUpdateHolding_Click" Background="#F39C12" Foreground="White" BorderThickness="0"/>
+                                                                                                <Button x:Name="btnTwRemoveHolding" Content="移除" Width="60" Height="26" Margin="0,0,6,0"
+                                                                                                                Click="BtnTwRemoveHolding_Click" Background="#E74C3C" Foreground="White" BorderThickness="0"/>
+                                                                                                <Button x:Name="btnTwResetHoldings" Content="重置" Width="60" Height="26"
+                                                                                                                Click="BtnTwResetHoldings_Click" Background="#616161" Foreground="White" BorderThickness="0"/>
+                                                                                        </WrapPanel>
+
+                                                                                        <WrapPanel Margin="0,0,0,8">
+                                                                                                <TextBlock Text="賣出股數" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                                                                <TextBox x:Name="txtTwSellQty" Width="90" Height="26" VerticalContentAlignment="Center" Margin="0,0,8,0"/>
+                                                                                                <TextBlock Text="賣出價格" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                                                                <TextBox x:Name="txtTwSellPrice" Width="90" Height="26" VerticalContentAlignment="Center" Margin="0,0,8,0"/>
+                                                                                                <Button x:Name="btnTwSellHolding" Content="賣出" Width="70" Height="26"
+                                                                                                                Click="BtnTwSellHolding_Click" Background="#8E44AD" Foreground="White" BorderThickness="0"/>
+                                                                                        </WrapPanel>
+
+                                                                                        <DataGrid x:Name="dgTwHoldings" AutoGenerateColumns="False" IsReadOnly="True" Height="240"
+                                                                                                        CanUserAddRows="False" AlternatingRowBackground="#F8F9FA" GridLinesVisibility="Horizontal"
+                                                                                                        HeadersVisibility="Column" FontSize="12" SelectionMode="Single"
+                                                                                                        SelectionChanged="DgTwHoldings_SelectionChanged">
+                                                                                                <DataGrid.Columns>
+                                                                                                        <DataGridTextColumn Header="代號" Binding="{Binding Ticker}" Width="80"/>
+                                                                                                        <DataGridTextColumn Header="名稱" Binding="{Binding Name}" Width="120"/>
+                                                                                                        <DataGridTextColumn Header="股數" Binding="{Binding Quantity, StringFormat={}{0:F2}}" Width="80"/>
+                                                                                                        <DataGridTextColumn Header="均價" Binding="{Binding AverageCost, StringFormat={}{0:F2}}" Width="80"/>
+                                                                                                        <DataGridTextColumn Header="現價" Binding="{Binding CurrentPrice, StringFormat={}{0:F2}}" Width="80"/>
+                                                                                                        <DataGridTextColumn Header="市值" Binding="{Binding MarketValue, StringFormat={}{0:F2}}" Width="90"/>
+                                                                                                        <DataGridTextColumn Header="總損益" Binding="{Binding UnrealizedPnL, StringFormat={}{0:F2}}" Width="90"/>
+                                                                                                        <DataGridTextColumn Header="損益(%)" Binding="{Binding PnLPercent, StringFormat={}{0:F2}%}" Width="90"/>
+                                                                                                </DataGrid.Columns>
+                                                                                        </DataGrid>
+                                                                                </StackPanel>
+
+                                                                                <Border Grid.Column="1" Background="#F3F5F7" BorderBrush="#DADFE6" BorderThickness="1" CornerRadius="6" Padding="10">
+                                                                                        <StackPanel>
+                                                                                                <TextBlock Text="損益總覽" FontWeight="Bold" Foreground="#2C3E50" Margin="0,0,0,8"/>
+                                                                                                <TextBlock x:Name="txtTwTotalPnL" Text="台股未實現：0.00 (0.00%)" FontWeight="Bold" Foreground="#2C3E50" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                                                                                                <TextBlock x:Name="txtTwRealizedPnL" Text="台股已實現：0.00" FontWeight="Bold" Foreground="#2C3E50" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                                                                                        </StackPanel>
+                                                                                </Border>
+                                                                        </Grid>
+                                                                </StackPanel>
+                                                        </ScrollViewer>
+                                                        </Border>
+                                                </TabItem>
+                                        </TabControl>
                                 </Grid>
                         </TabItem>
                 </TabControl>

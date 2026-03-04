@@ -72,6 +72,9 @@
     <Compile Include="TwStockFilterWindow.xaml.cs">
       <DependentUpon>TwStockFilterWindow.xaml</DependentUpon>
     </Compile>
+    <Compile Include="UserNameInputDialog.xaml.cs">
+      <DependentUpon>UserNameInputDialog.xaml</DependentUpon>
+    </Compile>
     <Page Include="AddStockDialog.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
@@ -94,6 +97,9 @@
       <Generator>MSBuild:Compile</Generator>
     </Page>
     <Page Include="TwStockFilterWindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="UserNameInputDialog.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
   </ItemGroup>

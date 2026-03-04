@@ -34,6 +34,7 @@ namespace StockManager
                 private double _chartAreaTop;
                 private double _chartAreaBottom;
                 private LoadingProgressPopup _loadingWindow;
+                private Dictionary<string, string> _tickerNameMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
                 public TrendAnalysisWindow(string ticker, string stockName, PriceFetcherService priceFetcher)
                 {
@@ -134,10 +135,12 @@ namespace StockManager
                         try
                         {
                                 var isTwMarket = IsTwTicker(_ticker);
-                                var marketDefaults = isTwMarket ? AppConfig.DefaultTwStocks : AppConfig.DefaultStocks;
+                                var marketStocks = isTwMarket
+                                        ? new StockManagerService(AppConfig.DefaultTwStocks, AppConfig.UserTwStocksFile).GetStocks()
+                                        : new StockManagerService(AppConfig.DefaultStocks, AppConfig.UserStocksFile).GetStocks();
                                 var itemMap = new Dictionary<string, StockSwitcherItem>(StringComparer.OrdinalIgnoreCase);
 
-                                foreach (var kv in marketDefaults)
+                                foreach (var kv in marketStocks)
                                 {
                                         itemMap[kv.Key] = new StockSwitcherItem
                                         {
@@ -166,6 +169,8 @@ namespace StockManager
                                                 Name = _stockName
                                         };
                                 }
+
+                                _tickerNameMap = itemMap.ToDictionary(x => x.Key, x => x.Value.Name, StringComparer.OrdinalIgnoreCase);
 
                                 var items = itemMap.Values.OrderBy(x => x.Name).ThenBy(x => x.Ticker).ToList();
                                 cboStockSwitcher.ItemsSource = items;
@@ -225,7 +230,11 @@ namespace StockManager
                         }
 
                         _ticker = newTicker;
-                        if (AppConfig.DefaultStocks.ContainsKey(newTicker))
+                        if (_tickerNameMap.ContainsKey(newTicker))
+                        {
+                                _stockName = _tickerNameMap[newTicker];
+                        }
+                        else if (AppConfig.DefaultStocks.ContainsKey(newTicker))
                         {
                                 _stockName = AppConfig.DefaultStocks[newTicker];
                         }

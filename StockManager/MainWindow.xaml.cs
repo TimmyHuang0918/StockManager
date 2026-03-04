@@ -14,7 +14,9 @@ using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
 using System.Windows.Shapes;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Net;
+using System.Web.Script.Serialization;
 using System.Windows.Threading;
 using System.Xml.Linq;
 using StockManager.Models;
@@ -39,7 +41,14 @@ namespace StockManager
                 private ObservableCollection<StockInfo> _twStockList;
                 private ObservableCollection<StockInfo> _usFilteredStockList;
                 private ObservableCollection<StockInfo> _twFilteredStockList;
+                private ObservableCollection<HoldingInfo> _usHoldingList;
+                private ObservableCollection<HoldingInfo> _twHoldingList;
                 private ObservableCollection<NewsImpactItem> _newsImpactList;
+                private readonly string _holdingUsersFile = System.IO.Path.Combine(AppConfig.UserConfigDir, "holding_users.json");
+                private List<string> _holdingUsers = new List<string>();
+                private string _currentHoldingUser = "default";
+                private double _usRealizedPnL = 0;
+                private double _twRealizedPnL = 0;
                 private DateTime _lastNewsUpdate = DateTime.MinValue;
                 private bool _isNewsUpdating = false;
                 private Dictionary<string, string> _translationCache = new Dictionary<string, string>();
@@ -66,6 +75,163 @@ namespace StockManager
                         Console.SetOut(new DebugTextWriter(this));
                 }
 
+                private void CboHoldingUser_SelectionChanged(object sender, SelectionChangedEventArgs e)
+                {
+                        if (cboHoldingUser == null)
+                        {
+                                return;
+                        }
+
+                        var selected = cboHoldingUser.SelectedItem as string;
+                        if (string.IsNullOrWhiteSpace(selected))
+                        {
+                                return;
+                        }
+
+                        if (string.Equals(_currentHoldingUser, selected, StringComparison.OrdinalIgnoreCase))
+                        {
+                                return;
+                        }
+
+                        _currentHoldingUser = selected.Trim();
+                        LoadHoldings();
+                        statusText.Text = $"已切換庫存使用者：{_currentHoldingUser}";
+                }
+
+                private void BtnAddHoldingUser_Click(object sender, RoutedEventArgs e)
+                {
+                        var input = ShowUserNameInputDialog();
+                        if (string.IsNullOrWhiteSpace(input)) return;
+
+                        // 允許中文等名稱，只過濾檔名非法字元
+                        var invalidChars = System.IO.Path.GetInvalidFileNameChars();
+                        var user = new string(input.Select(ch => invalidChars.Contains(ch) ? '_' : ch).ToArray()).Trim();
+                        if (string.IsNullOrWhiteSpace(user))
+                        {
+                                MessageBox.Show("使用者名稱格式無效", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                                return;
+                        }
+
+                        var existed = _holdingUsers.Contains(user, StringComparer.OrdinalIgnoreCase);
+                        if (!existed)
+                        {
+                                _holdingUsers.Add(user);
+                                _holdingUsers = _holdingUsers.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x).ToList();
+                                SaveHoldingUsersToFile();
+                        }
+
+                        cboHoldingUser.ItemsSource = null;
+                        cboHoldingUser.ItemsSource = _holdingUsers;
+                        cboHoldingUser.SelectedItem = _holdingUsers.FirstOrDefault(x => string.Equals(x, user, StringComparison.OrdinalIgnoreCase));
+                        statusText.Text = existed ? $"已切換庫存使用者：{user}" : $"已新增並切換庫存使用者：{user}";
+                }
+
+                private void BtnDeleteHoldingUser_Click(object sender, RoutedEventArgs e)
+                {
+                        var selected = cboHoldingUser?.SelectedItem as string;
+                        if (string.IsNullOrWhiteSpace(selected))
+                        {
+                                MessageBox.Show("請先選擇要刪除的使用者", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                                return;
+                        }
+
+                        if (_holdingUsers.Count <= 1)
+                        {
+                                MessageBox.Show("至少要保留一個使用者", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                                return;
+                        }
+
+                        var confirm = MessageBox.Show(
+                                $"確定要刪除使用者「{selected}」嗎？\n\n此動作會刪除該使用者的庫存與損益資料。",
+                                "刪除使用者警告",
+                                MessageBoxButton.YesNo,
+                                MessageBoxImage.Warning);
+
+                        if (confirm != MessageBoxResult.Yes)
+                        {
+                                return;
+                        }
+
+                        var userDir = System.IO.Path.Combine(AppConfig.UserConfigDir, "users", selected);
+                        if (Directory.Exists(userDir))
+                        {
+                                Directory.Delete(userDir, true);
+                        }
+
+                        _holdingUsers = _holdingUsers
+                                .Where(x => !string.Equals(x, selected, StringComparison.OrdinalIgnoreCase))
+                                .ToList();
+                        SaveHoldingUsersToFile();
+
+                        var next = _holdingUsers.FirstOrDefault() ?? "default";
+                        if (!_holdingUsers.Any())
+                        {
+                                _holdingUsers.Add(next);
+                                SaveHoldingUsersToFile();
+                        }
+
+                        cboHoldingUser.ItemsSource = null;
+                        cboHoldingUser.ItemsSource = _holdingUsers;
+                        cboHoldingUser.SelectedItem = next;
+                        statusText.Text = $"已刪除使用者：{selected}";
+                }
+
+                private string ShowUserNameInputDialog()
+                {
+                        var dialog = new Window
+                        {
+                                Title = "新增使用者",
+                                Width = 340,
+                                Height = 170,
+                                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                                ResizeMode = ResizeMode.NoResize,
+                                Owner = this,
+                                Background = new SolidColorBrush(Color.FromRgb(245, 247, 250))
+                        };
+
+                        var root = new Grid { Margin = new Thickness(14) };
+                        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+                        var label = new TextBlock { Text = "請輸入使用者名稱", FontWeight = FontWeights.Bold, Foreground = new SolidColorBrush(Color.FromRgb(44, 62, 80)) };
+                        Grid.SetRow(label, 0);
+                        root.Children.Add(label);
+
+                        var textBox = new TextBox { Height = 30, Margin = new Thickness(0, 8, 0, 0), VerticalContentAlignment = VerticalAlignment.Center };
+                        Grid.SetRow(textBox, 1);
+                        root.Children.Add(textBox);
+
+                        var hint = new TextBlock { Text = "可使用中文，系統會自動過濾不合法字元", Margin = new Thickness(0, 8, 0, 0), Foreground = new SolidColorBrush(Color.FromRgb(96, 125, 139)), FontSize = 11 };
+                        Grid.SetRow(hint, 2);
+                        root.Children.Add(hint);
+
+                        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+                        Grid.SetRow(buttons, 3);
+
+                        var btnOk = new Button { Content = "確定", Width = 80, Height = 30, Margin = new Thickness(0, 0, 8, 0), Background = new SolidColorBrush(Color.FromRgb(39, 174, 96)), Foreground = Brushes.White, BorderThickness = new Thickness(0) };
+                        var btnCancel = new Button { Content = "取消", Width = 80, Height = 30, Background = new SolidColorBrush(Color.FromRgb(149, 165, 166)), Foreground = Brushes.White, BorderThickness = new Thickness(0) };
+
+                        btnOk.Click += (s, e) => dialog.DialogResult = true;
+                        btnCancel.Click += (s, e) => dialog.DialogResult = false;
+
+                        buttons.Children.Add(btnOk);
+                        buttons.Children.Add(btnCancel);
+                        root.Children.Add(buttons);
+
+                        dialog.Content = root;
+                        dialog.Loaded += (s, e) => textBox.Focus();
+
+                        var result = dialog.ShowDialog();
+                        if (result != true)
+                        {
+                                return null;
+                        }
+
+                        return (textBox.Text ?? string.Empty).Trim();
+                }
+
                 private void InitializeServices()
                 {
                         // 初始化美股服務
@@ -86,14 +252,21 @@ namespace StockManager
                         _twStockList = new ObservableCollection<StockInfo>();
                         _usFilteredStockList = new ObservableCollection<StockInfo>();
                         _twFilteredStockList = new ObservableCollection<StockInfo>();
+                        _usHoldingList = new ObservableCollection<HoldingInfo>();
+                        _twHoldingList = new ObservableCollection<HoldingInfo>();
                         _newsImpactList = new ObservableCollection<NewsImpactItem>();
 
                         dgUsStocks.ItemsSource = _usFilteredStockList;
                         dgTwStocks.ItemsSource = _twFilteredStockList;
+                        dgUsHoldings.ItemsSource = _usHoldingList;
+                        dgTwHoldings.ItemsSource = _twHoldingList;
                         dgNewsImpact.ItemsSource = _newsImpactList;
+
+                        InitializeHoldingUsers();
 
                         // 載入股票數據
                         LoadStockData();
+                        LoadHoldings();
 
                         // 設置定時器
                         _updateTimer = new DispatcherTimer();
@@ -126,6 +299,212 @@ namespace StockManager
                                 _twStockList.Add(new StockInfo(stock.Key, stock.Value));
                         }
                         ApplyFilter("TW");
+                }
+
+                private void LoadHoldings()
+                {
+                        _usRealizedPnL = ReadRealizedPnL(GetRealizedFile("US"));
+                        _twRealizedPnL = ReadRealizedPnL(GetRealizedFile("TW"));
+
+                        _usHoldingList.Clear();
+                        foreach (var h in ReadHoldingsFromFile(GetHoldingFile("US")))
+                        {
+                                _usHoldingList.Add(h);
+                        }
+
+                        _twHoldingList.Clear();
+                        foreach (var h in ReadHoldingsFromFile(GetHoldingFile("TW")))
+                        {
+                                _twHoldingList.Add(h);
+                        }
+
+                        UpdateHoldingSummary("US");
+                        UpdateHoldingSummary("TW");
+                }
+
+                private double ReadRealizedPnL(string filePath)
+                {
+                        try
+                        {
+                                if (!File.Exists(filePath)) return 0;
+                                var text = File.ReadAllText(filePath).Trim();
+                                if (double.TryParse(text, out double value)) return value;
+                        }
+                        catch { }
+
+                        return 0;
+                }
+
+                private void SaveRealizedPnL(string market)
+                {
+                        try
+                        {
+                                if (!Directory.Exists(AppConfig.UserConfigDir))
+                                {
+                                        Directory.CreateDirectory(AppConfig.UserConfigDir);
+                                }
+
+                                var filePath = GetRealizedFile(market);
+                                var dir = System.IO.Path.GetDirectoryName(filePath);
+                                if (!string.IsNullOrWhiteSpace(dir) && !Directory.Exists(dir))
+                                {
+                                        Directory.CreateDirectory(dir);
+                                }
+
+                                var value = market == "US" ? _usRealizedPnL : _twRealizedPnL;
+                                File.WriteAllText(filePath, value.ToString("F4"), Encoding.UTF8);
+                        }
+                        catch (Exception ex)
+                        {
+                                Console.WriteLine($"[已實現損益儲存失敗] {market}: {ex.Message}");
+                        }
+                }
+
+                private List<HoldingInfo> ReadHoldingsFromFile(string filePath)
+                {
+                        try
+                        {
+                                if (!File.Exists(filePath))
+                                {
+                                        return new List<HoldingInfo>();
+                                }
+
+                                var json = File.ReadAllText(filePath);
+                                if (string.IsNullOrWhiteSpace(json))
+                                {
+                                        return new List<HoldingInfo>();
+                                }
+
+                                var serializer = new JavaScriptSerializer();
+                                var dtoList = serializer.Deserialize<List<HoldingDto>>(json) ?? new List<HoldingDto>();
+
+                                return dtoList.Select(x => new HoldingInfo
+                                {
+                                        Ticker = x.Ticker,
+                                        Name = x.Name,
+                                        Quantity = x.Quantity,
+                                        AverageCost = x.AverageCost,
+                                        CurrentPrice = x.CurrentPrice,
+                                        UpdatedAt = x.UpdatedAt
+                                }).ToList();
+                        }
+                        catch (Exception ex)
+                        {
+                                Console.WriteLine($"[庫存讀取失敗] {filePath}: {ex.Message}");
+                                return new List<HoldingInfo>();
+                        }
+                }
+
+                private void SaveHoldings(string market)
+                {
+                        try
+                        {
+                                if (!Directory.Exists(AppConfig.UserConfigDir))
+                                {
+                                        Directory.CreateDirectory(AppConfig.UserConfigDir);
+                                }
+
+                                var filePath = GetHoldingFile(market);
+                                var dir = System.IO.Path.GetDirectoryName(filePath);
+                                if (!string.IsNullOrWhiteSpace(dir) && !Directory.Exists(dir))
+                                {
+                                        Directory.CreateDirectory(dir);
+                                }
+
+                                var source = market == "US" ? _usHoldingList : _twHoldingList;
+
+                                var data = source.Select(x => new HoldingDto
+                                {
+                                        Ticker = x.Ticker,
+                                        Name = x.Name,
+                                        Quantity = x.Quantity,
+                                        AverageCost = x.AverageCost,
+                                        CurrentPrice = x.CurrentPrice,
+                                        UpdatedAt = x.UpdatedAt
+                                }).ToList();
+
+                                var serializer = new JavaScriptSerializer();
+                                var json = serializer.Serialize(data);
+                                File.WriteAllText(filePath, json, Encoding.UTF8);
+                        }
+                        catch (Exception ex)
+                        {
+                                Console.WriteLine($"[庫存儲存失敗] {market}: {ex.Message}");
+                        }
+                }
+
+                private string GetUserStorageDir()
+                {
+                        var userId = string.IsNullOrWhiteSpace(_currentHoldingUser) ? "default" : _currentHoldingUser.Trim();
+                        return System.IO.Path.Combine(AppConfig.UserConfigDir, "users", userId);
+                }
+
+                private string GetHoldingFile(string market)
+                {
+                        var fileName = market == "US" ? "us_holdings.json" : "tw_holdings.json";
+                        return System.IO.Path.Combine(GetUserStorageDir(), fileName);
+                }
+
+                private string GetRealizedFile(string market)
+                {
+                        var fileName = market == "US" ? "us_realized_pnl.txt" : "tw_realized_pnl.txt";
+                        return System.IO.Path.Combine(GetUserStorageDir(), fileName);
+                }
+
+                private void InitializeHoldingUsers()
+                {
+                        _holdingUsers = LoadHoldingUsersFromFile();
+                        if (_holdingUsers.Count == 0)
+                        {
+                                _holdingUsers.Add("default");
+                        }
+
+                        if (!_holdingUsers.Contains(_currentHoldingUser, StringComparer.OrdinalIgnoreCase))
+                        {
+                                _currentHoldingUser = _holdingUsers[0];
+                        }
+
+                        cboHoldingUser.ItemsSource = _holdingUsers;
+                        cboHoldingUser.SelectedItem = _currentHoldingUser;
+                }
+
+                private List<string> LoadHoldingUsersFromFile()
+                {
+                        try
+                        {
+                                if (!File.Exists(_holdingUsersFile))
+                                {
+                                        return new List<string>();
+                                }
+
+                                var json = File.ReadAllText(_holdingUsersFile);
+                                var serializer = new JavaScriptSerializer();
+                                var users = serializer.Deserialize<List<string>>(json) ?? new List<string>();
+                                return users.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                        }
+                        catch
+                        {
+                                return new List<string>();
+                        }
+                }
+
+                private void SaveHoldingUsersToFile()
+                {
+                        try
+                        {
+                                if (!Directory.Exists(AppConfig.UserConfigDir))
+                                {
+                                        Directory.CreateDirectory(AppConfig.UserConfigDir);
+                                }
+
+                                var serializer = new JavaScriptSerializer();
+                                var json = serializer.Serialize(_holdingUsers);
+                                File.WriteAllText(_holdingUsersFile, json, Encoding.UTF8);
+                        }
+                        catch (Exception ex)
+                        {
+                                Console.WriteLine($"[使用者清單儲存失敗] {ex.Message}");
+                        }
                 }
 
                 private void StartMonitoring()
@@ -456,10 +835,66 @@ namespace StockManager
                                 }
                         }
 
+                        UpdateHoldingPrices("US");
+                        UpdateHoldingPrices("TW");
+
                         dgUsStocks.Items.Refresh();
                         dgTwStocks.Items.Refresh();
+                        dgUsHoldings.Items.Refresh();
+                        dgTwHoldings.Items.Refresh();
                         _ = UpdateNewsImpactAsync();
                         Console.WriteLine("=== UI 已刷新 ===\n");
+                }
+
+                private void UpdateHoldingPrices(string market)
+                {
+                        var stocks = market == "US" ? _usStockList : _twStockList;
+                        var holdings = market == "US" ? _usHoldingList : _twHoldingList;
+
+                        foreach (var holding in holdings)
+                        {
+                                var stock = stocks.FirstOrDefault(x => string.Equals(x.Ticker, holding.Ticker, StringComparison.OrdinalIgnoreCase));
+                                if (stock != null)
+                                {
+                                        holding.Name = stock.Name;
+                                        holding.CurrentPrice = stock.Price;
+                                        holding.UpdatedAt = stock.UpdatedAt;
+                                }
+                        }
+
+                        UpdateHoldingSummary(market);
+                }
+
+                private void UpdateHoldingSummary(string market)
+                {
+                        var holdings = market == "US" ? _usHoldingList : _twHoldingList;
+                        var totalCost = holdings.Sum(x => x.CostAmount);
+                        var totalPnl = holdings.Sum(x => x.UnrealizedPnL);
+                        var totalPnlPct = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
+                        var realized = market == "US" ? _usRealizedPnL : _twRealizedPnL;
+
+                        var text = market == "US"
+                                ? $"美股未實現：{totalPnl:F2} ({totalPnlPct:F2}%)"
+                                : $"台股未實現：{totalPnl:F2} ({totalPnlPct:F2}%)";
+
+                        var realizedText = market == "US"
+                                ? $"美股已實現：{realized:F2}"
+                                : $"台股已實現：{realized:F2}";
+
+                        if (market == "US")
+                        {
+                                txtUsTotalPnL.Text = text;
+                                txtUsTotalPnL.Foreground = totalPnl >= 0 ? new SolidColorBrush(Color.FromRgb(39, 174, 96)) : new SolidColorBrush(Color.FromRgb(231, 76, 60));
+                                txtUsRealizedPnL.Text = realizedText;
+                                txtUsRealizedPnL.Foreground = realized >= 0 ? new SolidColorBrush(Color.FromRgb(39, 174, 96)) : new SolidColorBrush(Color.FromRgb(231, 76, 60));
+                        }
+                        else
+                        {
+                                txtTwTotalPnL.Text = text;
+                                txtTwTotalPnL.Foreground = totalPnl >= 0 ? new SolidColorBrush(Color.FromRgb(39, 174, 96)) : new SolidColorBrush(Color.FromRgb(231, 76, 60));
+                                txtTwRealizedPnL.Text = realizedText;
+                                txtTwRealizedPnL.Foreground = realized >= 0 ? new SolidColorBrush(Color.FromRgb(39, 174, 96)) : new SolidColorBrush(Color.FromRgb(231, 76, 60));
+                        }
                 }
 
                 private async Task UpdateNewsImpactAsync()
@@ -758,6 +1193,314 @@ namespace StockManager
                         var filterWindow = new TwStockFilterWindow();
                         filterWindow.Owner = this;
                         filterWindow.Show();
+                }
+
+                private void BtnUsAddHolding_Click(object sender, RoutedEventArgs e)
+                {
+                        AddHolding("US", txtUsHoldingTicker, txtUsHoldingQty, txtUsHoldingCost);
+                }
+
+                private void BtnTwAddHolding_Click(object sender, RoutedEventArgs e)
+                {
+                        AddHolding("TW", txtTwHoldingTicker, txtTwHoldingQty, txtTwHoldingCost);
+                }
+
+                private void BtnUsRemoveHolding_Click(object sender, RoutedEventArgs e)
+                {
+                        RemoveHolding("US", dgUsHoldings);
+                }
+
+                private void BtnTwRemoveHolding_Click(object sender, RoutedEventArgs e)
+                {
+                        RemoveHolding("TW", dgTwHoldings);
+                }
+
+                private void BtnUsResetHoldings_Click(object sender, RoutedEventArgs e)
+                {
+                        ResetHoldings("US");
+                }
+
+                private void BtnTwResetHoldings_Click(object sender, RoutedEventArgs e)
+                {
+                        ResetHoldings("TW");
+                }
+
+                private void BtnUsUpdateHolding_Click(object sender, RoutedEventArgs e)
+                {
+                        UpdateHolding("US", dgUsHoldings, txtUsHoldingTicker, txtUsHoldingQty, txtUsHoldingCost);
+                }
+
+                private void BtnTwUpdateHolding_Click(object sender, RoutedEventArgs e)
+                {
+                        UpdateHolding("TW", dgTwHoldings, txtTwHoldingTicker, txtTwHoldingQty, txtTwHoldingCost);
+                }
+
+                private void BtnUsSellHolding_Click(object sender, RoutedEventArgs e)
+                {
+                        SellHolding("US", dgUsHoldings, txtUsSellQty, txtUsSellPrice);
+                }
+
+                private void BtnTwSellHolding_Click(object sender, RoutedEventArgs e)
+                {
+                        SellHolding("TW", dgTwHoldings, txtTwSellQty, txtTwSellPrice);
+                }
+
+                private void DgUsHoldings_SelectionChanged(object sender, SelectionChangedEventArgs e)
+                {
+                        FillHoldingEditor("US", dgUsHoldings, txtUsHoldingTicker, txtUsHoldingQty, txtUsHoldingCost, txtUsSellPrice);
+                }
+
+                private void DgTwHoldings_SelectionChanged(object sender, SelectionChangedEventArgs e)
+                {
+                        FillHoldingEditor("TW", dgTwHoldings, txtTwHoldingTicker, txtTwHoldingQty, txtTwHoldingCost, txtTwSellPrice);
+                }
+
+                private void AddHolding(string market, TextBox tickerTextBox, TextBox qtyTextBox, TextBox costTextBox)
+                {
+                        var ticker = (tickerTextBox.Text ?? string.Empty).Trim().ToUpperInvariant();
+                        if (market == "TW" && !ticker.EndsWith(".TW", StringComparison.OrdinalIgnoreCase))
+                        {
+                                ticker += ".TW";
+                        }
+
+                        if (string.IsNullOrWhiteSpace(ticker))
+                        {
+                                MessageBox.Show("請輸入股票代號", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                                return;
+                        }
+
+                        if (!double.TryParse((qtyTextBox.Text ?? string.Empty).Trim(), out double qty) || qty <= 0)
+                        {
+                                MessageBox.Show("請輸入正確股數", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                                return;
+                        }
+
+                        if (!double.TryParse((costTextBox.Text ?? string.Empty).Trim(), out double avgCost) || avgCost <= 0)
+                        {
+                                MessageBox.Show("請輸入正確均價", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                                return;
+                        }
+
+                        var stockList = market == "US" ? _usStockList : _twStockList;
+                        var holdingList = market == "US" ? _usHoldingList : _twHoldingList;
+
+                        var stock = stockList.FirstOrDefault(x => string.Equals(x.Ticker, ticker, StringComparison.OrdinalIgnoreCase));
+                        var name = stock?.Name ?? ticker;
+                        var currentPrice = stock?.Price;
+
+                        var existing = holdingList.FirstOrDefault(x => string.Equals(x.Ticker, ticker, StringComparison.OrdinalIgnoreCase));
+                        if (existing != null)
+                        {
+                                var totalCostAmount = existing.CostAmount + (avgCost * qty);
+                                var totalQty = existing.Quantity + qty;
+
+                                existing.Quantity = totalQty;
+                                existing.AverageCost = totalQty > 0 ? totalCostAmount / totalQty : 0;
+                                existing.CurrentPrice = currentPrice;
+                                existing.UpdatedAt = DateTime.Now;
+                        }
+                        else
+                        {
+                                holdingList.Add(new HoldingInfo
+                                {
+                                        Ticker = ticker,
+                                        Name = name,
+                                        Quantity = qty,
+                                        AverageCost = avgCost,
+                                        CurrentPrice = currentPrice,
+                                        UpdatedAt = DateTime.Now
+                                });
+                        }
+
+                        SaveHoldings(market);
+                        UpdateHoldingSummary(market);
+
+                        tickerTextBox.Clear();
+                        qtyTextBox.Clear();
+                        costTextBox.Clear();
+                }
+
+                private void RemoveHolding(string market, DataGrid grid)
+                {
+                        if (!(grid.SelectedItem is HoldingInfo selected))
+                        {
+                                MessageBox.Show("請先選擇要移除的庫存", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                                return;
+                        }
+
+                        var result = MessageBox.Show($"確定移除庫存 {selected.Ticker} 嗎？", "確認", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                        if (result != MessageBoxResult.Yes)
+                        {
+                                return;
+                        }
+
+                        var holdingList = market == "US" ? _usHoldingList : _twHoldingList;
+                        holdingList.Remove(selected);
+                        SaveHoldings(market);
+                        UpdateHoldingSummary(market);
+                }
+
+                private void UpdateHolding(string market, DataGrid grid, TextBox tickerTextBox, TextBox qtyTextBox, TextBox costTextBox)
+                {
+                        if (!(grid.SelectedItem is HoldingInfo selected))
+                        {
+                                MessageBox.Show("請先選擇要修改的庫存", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                                return;
+                        }
+
+                        var ticker = (tickerTextBox.Text ?? string.Empty).Trim().ToUpperInvariant();
+                        if (market == "TW" && !ticker.EndsWith(".TW", StringComparison.OrdinalIgnoreCase))
+                        {
+                                ticker += ".TW";
+                        }
+
+                        if (string.IsNullOrWhiteSpace(ticker))
+                        {
+                                MessageBox.Show("請輸入股票代號", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                                return;
+                        }
+
+                        if (!double.TryParse((qtyTextBox.Text ?? string.Empty).Trim(), out double qty) || qty <= 0)
+                        {
+                                MessageBox.Show("請輸入正確股數", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                                return;
+                        }
+
+                        if (!double.TryParse((costTextBox.Text ?? string.Empty).Trim(), out double avgCost) || avgCost <= 0)
+                        {
+                                MessageBox.Show("請輸入正確均價", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                                return;
+                        }
+
+                        selected.Ticker = ticker;
+                        selected.Quantity = qty;
+                        selected.AverageCost = avgCost;
+                        selected.UpdatedAt = DateTime.Now;
+
+                        SaveHoldings(market);
+                        UpdateHoldingPrices(market);
+                }
+
+                private void SellHolding(string market, DataGrid grid, TextBox sellQtyTextBox, TextBox sellPriceTextBox)
+                {
+                        if (!(grid.SelectedItem is HoldingInfo selected))
+                        {
+                                MessageBox.Show("請先選擇要賣出的庫存", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                                return;
+                        }
+
+                        if (!double.TryParse((sellQtyTextBox.Text ?? string.Empty).Trim(), out double sellQty) || sellQty <= 0)
+                        {
+                                MessageBox.Show("請輸入正確賣出股數", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                                return;
+                        }
+
+                        if (sellQty > selected.Quantity)
+                        {
+                                MessageBox.Show("賣出股數不可超過持有股數", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                                return;
+                        }
+
+                        var sellPriceText = (sellPriceTextBox.Text ?? string.Empty).Trim();
+                        double sellPrice;
+                        if (!string.IsNullOrWhiteSpace(sellPriceText))
+                        {
+                                if (!double.TryParse(sellPriceText, out sellPrice) || sellPrice <= 0)
+                                {
+                                        MessageBox.Show("請輸入正確賣出價格", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                                        return;
+                                }
+                        }
+                        else if (selected.CurrentPrice.HasValue && selected.CurrentPrice.Value > 0)
+                        {
+                                sellPrice = selected.CurrentPrice.Value;
+                        }
+                        else
+                        {
+                                MessageBox.Show("請輸入賣出價格（目前無即時價格）", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                                return;
+                        }
+
+                        var realized = (sellPrice - selected.AverageCost) * sellQty;
+                        if (market == "US")
+                        {
+                                _usRealizedPnL += realized;
+                        }
+                        else
+                        {
+                                _twRealizedPnL += realized;
+                        }
+
+                        selected.Quantity -= sellQty;
+                        selected.UpdatedAt = DateTime.Now;
+
+                        var holdings = market == "US" ? _usHoldingList : _twHoldingList;
+                        if (selected.Quantity <= 0.000001)
+                        {
+                                holdings.Remove(selected);
+                        }
+
+                        SaveHoldings(market);
+                        SaveRealizedPnL(market);
+                        UpdateHoldingSummary(market);
+
+                        sellQtyTextBox.Clear();
+                        sellPriceTextBox.Clear();
+                }
+
+                private void FillHoldingEditor(string market, DataGrid grid, TextBox tickerTextBox, TextBox qtyTextBox, TextBox costTextBox, TextBox sellPriceTextBox)
+                {
+                        if (!(grid.SelectedItem is HoldingInfo selected))
+                        {
+                                return;
+                        }
+
+                        tickerTextBox.Text = selected.Ticker;
+                        qtyTextBox.Text = selected.Quantity.ToString("F2");
+                        costTextBox.Text = selected.AverageCost.ToString("F2");
+                        sellPriceTextBox.Text = selected.CurrentPrice.HasValue ? selected.CurrentPrice.Value.ToString("F2") : string.Empty;
+                }
+
+                private void ResetHoldings(string market)
+                {
+                        var marketLabel = market == "US" ? "美股" : "台股";
+                        var result = MessageBox.Show(
+                                $"確定要重置{marketLabel}庫存嗎？\n\n這會清空庫存與已實現損益。",
+                                "確認重置",
+                                MessageBoxButton.YesNo,
+                                MessageBoxImage.Warning);
+
+                        if (result != MessageBoxResult.Yes)
+                        {
+                                return;
+                        }
+
+                        if (market == "US")
+                        {
+                                _usHoldingList.Clear();
+                                _usRealizedPnL = 0;
+
+                                txtUsHoldingTicker.Clear();
+                                txtUsHoldingQty.Clear();
+                                txtUsHoldingCost.Clear();
+                                txtUsSellQty.Clear();
+                                txtUsSellPrice.Clear();
+                        }
+                        else
+                        {
+                                _twHoldingList.Clear();
+                                _twRealizedPnL = 0;
+
+                                txtTwHoldingTicker.Clear();
+                                txtTwHoldingQty.Clear();
+                                txtTwHoldingCost.Clear();
+                                txtTwSellQty.Clear();
+                                txtTwSellPrice.Clear();
+                        }
+
+                        SaveHoldings(market);
+                        SaveRealizedPnL(market);
+                        UpdateHoldingSummary(market);
                 }
 
                 public bool TryAddTwStockFromFilter(string ticker, string name, out string message)
@@ -1065,6 +1808,10 @@ namespace StockManager
 
                 protected override void OnClosed(EventArgs e)
                 {
+                        SaveHoldings("US");
+                        SaveHoldings("TW");
+                        SaveRealizedPnL("US");
+                        SaveRealizedPnL("TW");
                         _usMonitor?.StopThreads();
                         _twMonitor?.StopThreads();
                         _updateTimer?.Stop();
@@ -1072,6 +1819,97 @@ namespace StockManager
                         _debugWindow?.Close();
                         base.OnClosed(e);
                 }
+        }
+
+        public class HoldingInfo : System.ComponentModel.INotifyPropertyChanged
+        {
+                private string _ticker;
+                private string _name;
+                private double _quantity;
+                private double _averageCost;
+                private double? _currentPrice;
+                private DateTime? _updatedAt;
+
+                public string Ticker
+                {
+                        get => _ticker;
+                        set { _ticker = value; OnPropertyChanged(nameof(Ticker)); }
+                }
+
+                public string Name
+                {
+                        get => _name;
+                        set { _name = value; OnPropertyChanged(nameof(Name)); }
+                }
+
+                public double Quantity
+                {
+                        get => _quantity;
+                        set
+                        {
+                                _quantity = value;
+                                NotifyCalculatedChanged();
+                                OnPropertyChanged(nameof(Quantity));
+                        }
+                }
+
+                public double AverageCost
+                {
+                        get => _averageCost;
+                        set
+                        {
+                                _averageCost = value;
+                                NotifyCalculatedChanged();
+                                OnPropertyChanged(nameof(AverageCost));
+                        }
+                }
+
+                public double? CurrentPrice
+                {
+                        get => _currentPrice;
+                        set
+                        {
+                                _currentPrice = value;
+                                NotifyCalculatedChanged();
+                                OnPropertyChanged(nameof(CurrentPrice));
+                        }
+                }
+
+                public DateTime? UpdatedAt
+                {
+                        get => _updatedAt;
+                        set { _updatedAt = value; OnPropertyChanged(nameof(UpdatedAt)); }
+                }
+
+                public double CostAmount => Quantity * AverageCost;
+                public double MarketValue => Quantity * (CurrentPrice ?? 0);
+                public double UnrealizedPnL => MarketValue - CostAmount;
+                public double PnLPercent => CostAmount > 0 ? (UnrealizedPnL / CostAmount) * 100 : 0;
+
+                public event System.ComponentModel.PropertyChangedEventHandler PropertyChanged;
+
+                private void NotifyCalculatedChanged()
+                {
+                        OnPropertyChanged(nameof(CostAmount));
+                        OnPropertyChanged(nameof(MarketValue));
+                        OnPropertyChanged(nameof(UnrealizedPnL));
+                        OnPropertyChanged(nameof(PnLPercent));
+                }
+
+                private void OnPropertyChanged(string propertyName)
+                {
+                        PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(propertyName));
+                }
+        }
+
+        public class HoldingDto
+        {
+                public string Ticker { get; set; }
+                public string Name { get; set; }
+                public double Quantity { get; set; }
+                public double AverageCost { get; set; }
+                public double? CurrentPrice { get; set; }
+                public DateTime? UpdatedAt { get; set; }
         }
 
         public class NewsImpactItem
