@@ -27,6 +27,7 @@ namespace StockManager
                 private bool _isLoaded = false; // 標記視窗是否已完全載入
                 private List<CandlestickData> _historicalData = new List<CandlestickData>();
                 private bool _suppressStockSwitchEvent = false;
+                private int _intradayBarCount = 120;
                 private Line _crosshairVertical;
                 private Line _crosshairHorizontal;
                 private double _chartAreaLeft;
@@ -35,6 +36,9 @@ namespace StockManager
                 private double _chartAreaBottom;
                 private LoadingProgressPopup _loadingWindow;
                 private Dictionary<string, string> _tickerNameMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                private System.Windows.Threading.DispatcherTimer _realtimeKLineTimer;
+                private bool _isRealtimeKLineMode;
+                private bool _isRealtimeKLineRefreshing;
 
                 public TrendAnalysisWindow(string ticker, string stockName, PriceFetcherService priceFetcher)
                 {
@@ -54,6 +58,7 @@ namespace StockManager
 
                                 // 等待視窗載入完成後再繪製圖表
                                 this.Loaded += TrendAnalysisWindow_Loaded;
+                                this.Closed += TrendAnalysisWindow_Closed;
 
                                 Console.WriteLine($"[趨勢視窗] 建構函數完成");
                         }
@@ -72,14 +77,18 @@ namespace StockManager
                         }
                 }
 
-                private List<CandlestickData> GetDisplayData(List<CandlestickData> data)
+                private List<CandlestickData> GetDisplayData(List<CandlestickData> data, int candleCount = 0)
                 {
                         if (data == null || data.Count == 0)
                         {
                                 return new List<CandlestickData>();
                         }
 
-                        // 依照當前時間範圍顯示完整天數（不再限制最多 50 筆）
+                        if (candleCount > 0)
+                        {
+                                return data.Skip(Math.Max(0, data.Count - candleCount)).ToList();
+                        }
+
                         return data.ToList();
                 }
 
@@ -92,11 +101,18 @@ namespace StockManager
                                 // 設置預設的時間週期選項（3個月）
                                 if (cboPeriod != null && cboPeriod.Items.Count > 1)
                                 {
-                                        cboPeriod.SelectedIndex = 1; // 選擇 "3個月"
+                                        cboPeriod.SelectedIndex = 2; // 選擇 "3個月"
                                         Console.WriteLine($"[趨勢視窗] 設置預設週期為 3個月");
                                 }
 
+                                if (cboIntradayBars != null)
+                                {
+                                        cboIntradayBars.SelectedIndex = 2; // 120根
+                                }
+
                                 InitializeStockSwitcher();
+                                InitializeRealtimeKLineTimer();
+                                UpdateIntradayBarsControlVisibility();
 
                                 _isLoaded = true; // 標記為已載入
 
@@ -121,6 +137,132 @@ namespace StockManager
                                 if (txtTitle != null) txtTitle.Text = $"錯誤 - {_stockName} ({_ticker})";
                                 if (txtSubtitle != null) txtSubtitle.Text = $"載入失敗: {ex.Message}";
                                 if (txtCurrentPrice != null) txtCurrentPrice.Text = "錯誤";
+                        }
+                }
+
+                private void UpdateIntradayBarsControlVisibility()
+                {
+                        var isIntraday = string.Equals(_currentPeriod, "5m", StringComparison.OrdinalIgnoreCase);
+
+                        if (txtIntradayBarsLabel != null)
+                        {
+                                txtIntradayBarsLabel.Visibility = isIntraday ? Visibility.Visible : Visibility.Collapsed;
+                        }
+
+                        if (cboIntradayBars != null)
+                        {
+                                cboIntradayBars.Visibility = isIntraday ? Visibility.Visible : Visibility.Collapsed;
+                        }
+                }
+
+                private async void CboIntradayBars_SelectionChanged(object sender, SelectionChangedEventArgs e)
+                {
+                        if (!_isLoaded)
+                        {
+                                return;
+                        }
+
+                        if (cboIntradayBars?.SelectedItem is ComboBoxItem item)
+                        {
+                                int bars;
+                                if (int.TryParse(item.Tag?.ToString(), out bars) && bars > 0)
+                                {
+                                        _intradayBarCount = bars;
+                                        if (string.Equals(_currentPeriod, "5m", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                                if (_historicalData != null && _historicalData.Count > 0)
+                                                {
+                                                        DrawCandlestickChart(_historicalData, _intradayBarCount);
+                                                        DrawVolumeChart(_historicalData);
+                                                        DrawMacdChart(_historicalData);
+                                                        DrawRsiChart(_historicalData);
+
+                                                        if (txtSubtitle != null)
+                                                        {
+                                                                txtSubtitle.Text = $"資料更新時間: {DateTime.Now:yyyy-MM-dd HH:mm:ss} | 週期: {GetPeriodDisplay(_currentPeriod)}（{_intradayBarCount}根）{(_isRealtimeKLineMode ? " | 即時K線" : string.Empty)}";
+                                                        }
+                                                }
+                                                else
+                                                {
+                                                        await LoadDataAsync(false);
+                                                }
+                                        }
+                                }
+                        }
+                }
+
+                private void TrendAnalysisWindow_Closed(object sender, EventArgs e)
+                {
+                        if (_realtimeKLineTimer != null)
+                        {
+                                _realtimeKLineTimer.Stop();
+                                _realtimeKLineTimer = null;
+                        }
+                }
+
+                private void InitializeRealtimeKLineTimer()
+                {
+                        if (_realtimeKLineTimer != null)
+                        {
+                                return;
+                        }
+
+                        _realtimeKLineTimer = new System.Windows.Threading.DispatcherTimer
+                        {
+                                Interval = TimeSpan.FromSeconds(20)
+                        };
+
+                        _realtimeKLineTimer.Tick += async (s, e) => await RefreshRealtimeKLineAsync();
+                }
+
+                private async void BtnRealtimeKLine_Click(object sender, RoutedEventArgs e)
+                {
+                        _isRealtimeKLineMode = !_isRealtimeKLineMode;
+                        var realtimeButton = sender as Button ?? FindName("btnRealtimeKLine") as Button;
+
+                        if (realtimeButton != null)
+                        {
+                                realtimeButton.Content = _isRealtimeKLineMode ? "即時K線：開啟" : "即時K線：關閉";
+                                realtimeButton.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(_isRealtimeKLineMode ? "#2E7D32" : "#546E7A"));
+                        }
+
+                        if (_isRealtimeKLineMode)
+                        {
+                                if (_realtimeKLineTimer != null)
+                                {
+                                        _realtimeKLineTimer.Start();
+                                }
+
+                                await RefreshRealtimeKLineAsync();
+                        }
+                        else
+                        {
+                                if (_realtimeKLineTimer != null)
+                                {
+                                        _realtimeKLineTimer.Stop();
+                                }
+                        }
+                }
+
+                private async Task RefreshRealtimeKLineAsync()
+                {
+                        if (!_isRealtimeKLineMode || _isRealtimeKLineRefreshing || !_isLoaded)
+                        {
+                                return;
+                        }
+
+                        _isRealtimeKLineRefreshing = true;
+                        try
+                        {
+                                await LoadDataAsync(false);
+                        }
+                        catch (Exception ex)
+                        {
+                                Console.WriteLine($"[趨勢視窗] 即時K線更新失敗: {ex.Message}");
+                        }
+                        finally
+                        {
+                                _isRealtimeKLineRefreshing = false;
                         }
                 }
 
@@ -263,14 +405,17 @@ namespace StockManager
                         public string DisplayName => $"{Name} ({Ticker})";
                 }
 
-                private async Task LoadDataAsync()
+                private async Task LoadDataAsync(bool showLoading = true)
                 {
                         try
                         {
                                 Console.WriteLine($"[趨勢視窗] 開始 LoadData for {_ticker}");
 
-                                ShowLoadingWindow();
-                                UpdateLoadingWindow(5, "初始化畫面...");
+                                if (showLoading)
+                                {
+                                        ShowLoadingWindow();
+                                        UpdateLoadingWindow(5, "初始化畫面...");
+                                }
                                 await Task.Yield();
 
                                 if (txtTitle == null || txtSubtitle == null || txtCurrentPrice == null)
@@ -280,8 +425,16 @@ namespace StockManager
                                 }
 
                                 txtTitle.Text = $"{_stockName} ({_ticker}) - 趨勢分析";
-                                txtSubtitle.Text = $"資料更新時間: {DateTime.Now:yyyy-MM-dd HH:mm:ss} | 週期: {GetPeriodDisplay(_currentPeriod)}";
-                                UpdateLoadingWindow(15, "更新標題資訊...");
+                                var periodText = GetPeriodDisplay(_currentPeriod);
+                                if (string.Equals(_currentPeriod, "5m", StringComparison.OrdinalIgnoreCase))
+                                {
+                                        periodText += $"（{_intradayBarCount}根）";
+                                }
+                                txtSubtitle.Text = $"資料更新時間: {DateTime.Now:yyyy-MM-dd HH:mm:ss} | 週期: {periodText}{(_isRealtimeKLineMode ? " | 即時K線" : string.Empty)}";
+                                if (showLoading)
+                                {
+                                        UpdateLoadingWindow(15, "更新標題資訊...");
+                                }
 
                                 Console.WriteLine($"[趨勢視窗] 準備獲取即時價格");
 
@@ -295,7 +448,10 @@ namespace StockManager
                                 var result = await Task.Run(() => _priceFetcher.GetRealtimePriceWithSource(_ticker));
                                 var currentPrice = result.Item1;
                                 var changePercent = result.Item2;
-                                UpdateLoadingWindow(45, "取得即時價格...");
+                                if (showLoading)
+                                {
+                                        UpdateLoadingWindow(45, "取得即時價格...");
+                                }
 
                                 Console.WriteLine($"[趨勢視窗] 獲取價格結果: Price={currentPrice}, Change={changePercent}");
 
@@ -347,12 +503,18 @@ namespace StockManager
                                         }
 
                                         Console.WriteLine($"[趨勢視窗] 準備生成分析數據");
-                                        UpdateLoadingWindow(60, "抓取歷史資料與計算技術指標...");
+                                        if (showLoading)
+                                        {
+                                                UpdateLoadingWindow(60, "抓取歷史資料與計算技術指標...");
+                                        }
                                         await Task.Yield();
 
                                         // 生成歷史數據和技術指標（背景執行）
                                         await GenerateAnalysisDataAsync(currentPrice.Value, changePercent);
-                                        UpdateLoadingWindow(95, "完成，正在整理畫面...");
+                                        if (showLoading)
+                                        {
+                                                UpdateLoadingWindow(95, "完成，正在整理畫面...");
+                                        }
 
                                         Console.WriteLine($"[趨勢視窗] LoadData 完成");
                                 }
@@ -380,8 +542,11 @@ namespace StockManager
                         }
                         finally
                         {
-                                UpdateLoadingWindow(100, "完成");
-                                HideLoadingWindow();
+                                if (showLoading)
+                                {
+                                        UpdateLoadingWindow(100, "完成");
+                                        HideLoadingWindow();
+                                }
                         }
                 }
 
@@ -457,7 +622,7 @@ namespace StockManager
                                 Console.WriteLine($"[趨勢視窗] 準備繪製圖表");
 
                                 // 繪製圖表
-                                DrawCandlestickChart(calc.HistoricalData);
+                                DrawCandlestickChart(calc.HistoricalData, string.Equals(_currentPeriod, "5m", StringComparison.OrdinalIgnoreCase) ? _intradayBarCount : 0);
                                 DrawVolumeChart(calc.HistoricalData);
                                 DrawMacdChart(calc.HistoricalData);
                                 DrawRsiChart(calc.HistoricalData);
@@ -564,8 +729,27 @@ namespace StockManager
                 private AnalysisCalculationResult ComputeAnalysisData(double currentPrice)
                 {
                         var historicalData = new List<CandlestickData>();
+                        var historyPeriod = _currentPeriod;
+                        var historyInterval = "1d";
+                        if (string.Equals(_currentPeriod, "5m", StringComparison.OrdinalIgnoreCase))
+                        {
+                                var bars = Math.Max(1, _intradayBarCount);
+                                if (bars <= 390)
+                                {
+                                        historyPeriod = "5d";
+                                }
+                                else if (bars <= 1560)
+                                {
+                                        historyPeriod = "1mo";
+                                }
+                                else
+                                {
+                                        historyPeriod = "3mo";
+                                }
+                                historyInterval = "5m";
+                        }
 
-                        if (!TryLoadHistoricalDataFromYFinance(_ticker, _currentPeriod, historicalData))
+                        if (!TryLoadHistoricalDataFromYFinance(_ticker, historyPeriod, historyInterval, historicalData))
                         {
                                 Console.WriteLine($"[趨勢視窗] 無法取得 {_ticker} 歷史資料，取消隨機資料回填。");
                         }
@@ -833,7 +1017,7 @@ namespace StockManager
                         return ema;
                 }
 
-                private void DrawCandlestickChart(List<CandlestickData> data)
+                private void DrawCandlestickChart(List<CandlestickData> data, int candleCount = 0)
                 {
                         try
                         {
@@ -870,14 +1054,17 @@ namespace StockManager
                                 var paddingTop = 10.0;
                                 var paddingBottom = 28.0;
 
-                                var minPrice = data.Min(d => d.Low);
-                                var maxPrice = data.Max(d => d.High);
-                                var priceRange = maxPrice - minPrice;
-
+                                var displayData = GetDisplayData(data, candleCount);
+		                var minPrice = displayData.Min(d => d.Low);
+		                var maxPrice = displayData.Max(d => d.High);
+		                var priceRange = maxPrice - minPrice;
+		                var displayCount = displayData.Count;
+                
                                 if (priceRange == 0) priceRange = 1; // 避免除以零
-
-                                var displayData = GetDisplayData(data);
-                                var displayCount = displayData.Count;
+                                if (displayCount == 0)
+                                {
+                                        return;
+                                }
                                 var plotWidth = Math.Max(width - paddingXLeft - paddingXRight, 100);
                                 var plotHeight = Math.Max(height - paddingTop - paddingBottom, 80);
                                 var candleWidth = Math.Max(plotWidth / displayCount * 0.6, 2);
@@ -968,9 +1155,15 @@ namespace StockManager
                                                 chartCanvas.Children.Add(xTick);
 
                                                 var candleData = displayData[dataIndex];
+                                                var xAxisText = candleData.Date;
+                                                if (string.Equals(_currentPeriod, "5m", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(candleData.Date))
+                                                {
+                                                        var parts = candleData.Date.Split(' ');
+                                                        xAxisText = parts.Length > 1 ? parts[1] : candleData.Date;
+                                                }
                                                 var xLabel = new TextBlock
                                                 {
-                                                        Text = candleData.Date,
+                                                        Text = xAxisText,
                                                         FontSize = 9,
                                                         Foreground = new SolidColorBrush(Colors.DimGray)
                                                 };
@@ -1185,7 +1378,7 @@ namespace StockManager
 
                         if (_historicalData != null && _historicalData.Count > 0)
                         {
-                                DrawCandlestickChart(_historicalData);
+                                DrawCandlestickChart(_historicalData, string.Equals(_currentPeriod, "5m", StringComparison.OrdinalIgnoreCase) ? _intradayBarCount : 0);
                                 DrawVolumeChart(_historicalData);
                                 DrawMacdChart(_historicalData);
                                 DrawRsiChart(_historicalData);
@@ -1872,7 +2065,7 @@ namespace StockManager
                         }
                 }
 
-                private bool TryLoadHistoricalDataFromYFinance(string ticker, string period, List<CandlestickData> target)
+                private bool TryLoadHistoricalDataFromYFinance(string ticker, string period, string interval, List<CandlestickData> target)
                 {
                         try
                         {
@@ -1890,7 +2083,7 @@ namespace StockManager
                                 var startInfo = new ProcessStartInfo
                                 {
                                         FileName = hasExe ? exePath : AppConfig.PythonPath,
-                                        Arguments = hasExe ? $"{ticker} history {period}" : $"\"{scriptPath}\" {ticker} history {period}",
+                                        Arguments = hasExe ? $"{ticker} history {period} {interval}" : $"\"{scriptPath}\" {ticker} history {period} {interval}",
                                         UseShellExecute = false,
                                         RedirectStandardOutput = true,
                                         RedirectStandardError = true,
@@ -1945,7 +2138,9 @@ namespace StockManager
 
                                                 target.Add(new CandlestickData
                                                 {
-                                                        Date = date.ToString("MM/dd"),
+                                                        Date = string.Equals(interval, "5m", StringComparison.OrdinalIgnoreCase)
+                                                                ? date.ToString("MM/dd HH:mm")
+                                                                : date.ToString("MM/dd"),
                                                         Open = open,
                                                         High = high,
                                                         Low = low,
@@ -2442,6 +2637,7 @@ namespace StockManager
                 {
                         switch (period)
                         {
+                                case "5m": return "5分K";
                                 case "1mo": return "1個月";
                                 case "3mo": return "3個月";
                                 case "6mo": return "6個月";
@@ -2455,6 +2651,7 @@ namespace StockManager
                 {
                         switch (period)
                         {
+                                case "5m": return 1;
                                 case "1mo": return 30;
                                 case "3mo": return 90;
                                 case "6mo": return 180;
@@ -2494,6 +2691,7 @@ namespace StockManager
                                         {
                                                 Console.WriteLine($"[趨勢視窗] 週期變更: {_currentPeriod} → {newPeriod}");
                                                 _currentPeriod = newPeriod;
+                                                UpdateIntradayBarsControlVisibility();
                                                 await LoadDataAsync();
                                         }
                                 }

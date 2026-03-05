@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -9,11 +10,13 @@ using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Shapes;
 using System.Web.Script.Serialization;
 using StockManager.Config;
 using StockManager.Converters;
 using StockManager.Models;
 using StockManager.Services;
+using IOPath = System.IO.Path;
 
 namespace StockManager
 {
@@ -33,18 +36,37 @@ namespace StockManager
         private readonly Dictionary<string, string> _tickerToCsvSector = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         private readonly List<string> _yahooListedSectors = new List<string>();
         private readonly Dictionary<string, string> _tickerToYahooSector = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private readonly string _twYFinanceSectorCacheFile = IOPath.Combine(AppConfig.UserConfigDir, "tw_sector_yfinance_cache.json");
+        private System.Windows.Threading.DispatcherTimer _autoYFinanceUpdateTimer;
+        private bool _isAutoYFinanceUpdating;
+        private DateTime _lastAutoYFinanceUpdateDate = DateTime.MinValue;
+        private DateTime? _lastYFinanceCacheUpdatedAt;
+        private bool _loadedFromCsv;
+        private string _noPriceSummary = string.Empty;
 
         public TwStockFilterWindow()
         {
             InitializeComponent();
             dgFilteredTwStocks.ItemsSource = _filteredStocks;
             Loaded += TwStockFilterWindow_Loaded;
+            Closed += TwStockFilterWindow_Closed;
         }
 
         private async void TwStockFilterWindow_Loaded(object sender, RoutedEventArgs e)
         {
             await System.Threading.Tasks.Task.Run(() => LoadAllListedTwStocks());
             ApplyFilter();
+            StartAutoYFinanceBackgroundUpdate();
+            await TryRunAutoYFinanceUpdateAsync();
+        }
+
+        private void TwStockFilterWindow_Closed(object sender, EventArgs e)
+        {
+            if (_autoYFinanceUpdateTimer != null)
+            {
+                _autoYFinanceUpdateTimer.Stop();
+                _autoYFinanceUpdateTimer = null;
+            }
         }
 
         private void BtnApplyFilter_Click(object sender, RoutedEventArgs e)
@@ -143,13 +165,15 @@ namespace StockManager
             Title = $"台股篩選（{_filteredStocks.Count} 筆）";
         }
 
-        private void BtnSectorOverview_Click(object sender, RoutedEventArgs e)
+        private async void BtnSectorOverview_Click(object sender, RoutedEventArgs e)
         {
             if (_sectorSamples.Count == 0)
             {
                 MessageBox.Show("尚未載入族群資料。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
+
+            await EnsureSectorYFinanceDataAsync();
 
             var groupedAll = _sectorSamples
                 .GroupBy(x => MapSectorCategory(x.Industry, x.Name, x.Ticker))
@@ -164,6 +188,11 @@ namespace StockManager
             var sectorFramework = _csvSectorOrder.Count > 0
                 ? _csvSectorOrder
                 : (_yahooListedSectors.Count > 0 ? _yahooListedSectors : YahooSectorFallback.ToList());
+            if (_sectorSamples.Any(x => string.Equals(x.Industry, "ETF", StringComparison.OrdinalIgnoreCase))
+                && !sectorFramework.Contains("ETF"))
+            {
+                sectorFramework = sectorFramework.Concat(new[] { "ETF" }).ToList();
+            }
             foreach (var sector in sectorFramework)
             {
                 List<SectorSampleItem> bucket;
@@ -537,8 +566,8 @@ namespace StockManager
             {
                 Title = $"{sectorName} 成分股（{sorted.Count} 檔）",
                 Owner = this,
-                Width = 760,
-                Height = 560,
+                Width = 900,
+                Height = 760,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
                 Background = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#F3F6FA")
             };
@@ -546,6 +575,7 @@ namespace StockManager
             var layoutRoot = new Grid { Margin = new Thickness(12) };
             layoutRoot.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             layoutRoot.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            layoutRoot.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             var headerPanel = new Border
             {
@@ -598,10 +628,257 @@ namespace StockManager
                 Child = grid
             };
 
+            var realtimeToggleButton = new Button
+            {
+                Content = "即時模式：關閉",
+                Width = 130,
+                Height = 30,
+                Margin = new Thickness(0, 0, 10, 0),
+                Background = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#546E7A"),
+                Foreground = Brushes.White,
+                BorderThickness = new Thickness(0)
+            };
+
+            var realtimeStatusText = new TextBlock
+            {
+                Text = "K線：請在列表中選擇股票",
+                VerticalAlignment = VerticalAlignment.Center,
+                Foreground = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#455A64")
+            };
+
+            var periodTodayButton = new Button
+            {
+                Content = "當日",
+                Width = 56,
+                Height = 28,
+                Margin = new Thickness(0, 0, 6, 0),
+                Background = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#90A4AE"),
+                Foreground = Brushes.White,
+                BorderThickness = new Thickness(0)
+            };
+
+            var period1MButton = new Button
+            {
+                Content = "1月",
+                Width = 56,
+                Height = 28,
+                Margin = new Thickness(0, 0, 6, 0),
+                Background = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#90A4AE"),
+                Foreground = Brushes.White,
+                BorderThickness = new Thickness(0)
+            };
+
+            var period3MButton = new Button
+            {
+                Content = "3月",
+                Width = 56,
+                Height = 28,
+                Margin = new Thickness(0, 0, 6, 0),
+                Background = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#1976D2"),
+                Foreground = Brushes.White,
+                BorderThickness = new Thickness(0)
+            };
+
+            var period6MButton = new Button
+            {
+                Content = "6月",
+                Width = 56,
+                Height = 28,
+                Margin = new Thickness(0, 0, 6, 0),
+                Background = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#90A4AE"),
+                Foreground = Brushes.White,
+                BorderThickness = new Thickness(0)
+            };
+
+            var period1YButton = new Button
+            {
+                Content = "1年",
+                Width = 56,
+                Height = 28,
+                Margin = new Thickness(0, 0, 10, 0),
+                Background = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#90A4AE"),
+                Foreground = Brushes.White,
+                BorderThickness = new Thickness(0)
+            };
+
+            var controlPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Margin = new Thickness(0, 10, 0, 6)
+            };
+            controlPanel.Children.Add(realtimeToggleButton);
+            controlPanel.Children.Add(periodTodayButton);
+            controlPanel.Children.Add(period1MButton);
+            controlPanel.Children.Add(period3MButton);
+            controlPanel.Children.Add(period6MButton);
+            controlPanel.Children.Add(period1YButton);
+            controlPanel.Children.Add(realtimeStatusText);
+
+            var klineCanvas = new Canvas
+            {
+                Height = 250,
+                Background = Brushes.White,
+                ClipToBounds = true
+            };
+
+            var chartBorder = new Border
+            {
+                Background = Brushes.White,
+                BorderBrush = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#D9E2EC"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(8),
+                Child = new StackPanel
+                {
+                    Children =
+                    {
+                        controlPanel,
+                        klineCanvas
+                    }
+                }
+            };
+
+            var isRealtimeMode = false;
+            var isRealtimeRefreshing = false;
+            var realtimeTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(20) };
+            var currentKLinePeriod = "3mo";
+            var currentKLineInterval = "1d";
+
+            Action updatePeriodButtonStyles = () =>
+            {
+                var normalBrush = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#90A4AE");
+                var activeBrush = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#1976D2");
+
+                periodTodayButton.Background = currentKLinePeriod == "1d" ? activeBrush : normalBrush;
+                period1MButton.Background = currentKLinePeriod == "1mo" ? activeBrush : normalBrush;
+                period3MButton.Background = currentKLinePeriod == "3mo" ? activeBrush : normalBrush;
+                period6MButton.Background = currentKLinePeriod == "6mo" ? activeBrush : normalBrush;
+                period1YButton.Background = currentKLinePeriod == "1y" ? activeBrush : normalBrush;
+            };
+
+            Action refreshKLine = () =>
+            {
+                var selected = grid.SelectedItem as SectorStockDetailItem ?? sorted.FirstOrDefault();
+                if (selected == null)
+                {
+                    return;
+                }
+
+                var history = new List<KLinePoint>();
+                var ok = TryLoadHistoricalDataFromYFinanceForKLine(NormalizeTwTicker(selected.Ticker), currentKLinePeriod, currentKLineInterval, history);
+                if (!ok)
+                {
+                    klineCanvas.Children.Clear();
+                    var msg = new TextBlock
+                    {
+                        Text = $"{selected.Ticker} 無法載入 K 線資料",
+                        Foreground = Brushes.Gray
+                    };
+                    Canvas.SetLeft(msg, 10);
+                    Canvas.SetTop(msg, 10);
+                    klineCanvas.Children.Add(msg);
+                    return;
+                }
+
+                DrawKLineChart(klineCanvas, history, $"{selected.Ticker} {selected.Name}");
+                realtimeStatusText.Text = isRealtimeMode
+                    ? $"即時模式中（20秒）｜K線：{selected.Ticker}"
+                    : $"K線：{selected.Ticker}";
+            };
+
+            grid.SelectionChanged += (s, e) => refreshKLine();
+
+            periodTodayButton.Click += (s, e) =>
+            {
+                currentKLinePeriod = "1d";
+                currentKLineInterval = "5m";
+                updatePeriodButtonStyles();
+                refreshKLine();
+            };
+            period1MButton.Click += (s, e) =>
+            {
+                currentKLinePeriod = "1mo";
+                currentKLineInterval = "1d";
+                updatePeriodButtonStyles();
+                refreshKLine();
+            };
+            period3MButton.Click += (s, e) =>
+            {
+                currentKLinePeriod = "3mo";
+                currentKLineInterval = "1d";
+                updatePeriodButtonStyles();
+                refreshKLine();
+            };
+            period6MButton.Click += (s, e) =>
+            {
+                currentKLinePeriod = "6mo";
+                currentKLineInterval = "1d";
+                updatePeriodButtonStyles();
+                refreshKLine();
+            };
+            period1YButton.Click += (s, e) =>
+            {
+                currentKLinePeriod = "1y";
+                currentKLineInterval = "1d";
+                updatePeriodButtonStyles();
+                refreshKLine();
+            };
+
+            realtimeTimer.Tick += async (s, e) =>
+            {
+                if (!isRealtimeMode || isRealtimeRefreshing || !detailWindow.IsLoaded)
+                {
+                    return;
+                }
+
+                isRealtimeRefreshing = true;
+                try
+                {
+                    await System.Threading.Tasks.Task.Run(() => RefreshSectorStockRealtimePrices(sorted, null));
+                    sorted.Sort((a, b) =>
+                    {
+                        var changeCompare = Nullable.Compare(b.ChangePercent, a.ChangePercent);
+                        if (changeCompare != 0)
+                        {
+                            return changeCompare;
+                        }
+
+                        return string.Compare(a.Ticker, b.Ticker, StringComparison.OrdinalIgnoreCase);
+                    });
+                    grid.Items.Refresh();
+                    refreshKLine();
+                }
+                finally
+                {
+                    isRealtimeRefreshing = false;
+                }
+            };
+
+            realtimeToggleButton.Click += (s, e) =>
+            {
+                isRealtimeMode = !isRealtimeMode;
+                if (isRealtimeMode)
+                {
+                    realtimeToggleButton.Content = "即時模式：開啟";
+                    realtimeToggleButton.Background = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#2E7D32");
+                    realtimeTimer.Start();
+                    refreshKLine();
+                }
+                else
+                {
+                    realtimeToggleButton.Content = "即時模式：關閉";
+                    realtimeToggleButton.Background = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#546E7A");
+                    realtimeStatusText.Text = "即時模式已關閉";
+                    realtimeTimer.Stop();
+                }
+            };
+
             Grid.SetRow(headerPanel, 0);
             Grid.SetRow(contentBorder, 1);
+            Grid.SetRow(chartBorder, 2);
             layoutRoot.Children.Add(headerPanel);
             layoutRoot.Children.Add(contentBorder);
+            layoutRoot.Children.Add(chartBorder);
             detailWindow.Content = layoutRoot;
 
             detailWindow.Loaded += async (s, e) =>
@@ -644,10 +921,554 @@ namespace StockManager
                     headerTextBlock.Text = $"📈 {sectorName} 成分股（{sorted.Count} 檔）｜yfinance 已更新";
                     progressBar.Value = 100;
                     progressTextBlock.Text = "yfinance 更新完成";
+                    if (grid.SelectedItem == null && sorted.Count > 0)
+                    {
+                        grid.SelectedItem = sorted[0];
+                    }
+                    updatePeriodButtonStyles();
+                    refreshKLine();
                 });
             };
 
+            detailWindow.Closed += (s, e) => realtimeTimer.Stop();
+
             detailWindow.ShowDialog();
+        }
+
+        private bool TryLoadHistoricalDataFromYFinanceForKLine(string ticker, string period, string interval, List<KLinePoint> target)
+        {
+            try
+            {
+                var exePath = ResolveYFinanceExecutablePathForKLine();
+                var scriptPath = ResolveYFinanceScriptPathForKLine();
+                var hasExe = File.Exists(exePath);
+                var hasScript = File.Exists(scriptPath);
+                if (!hasExe && !hasScript)
+                {
+                    return false;
+                }
+
+                var startInfo = new ProcessStartInfo
+                {
+                    FileName = hasExe ? exePath : AppConfig.PythonPath,
+                    Arguments = hasExe ? $"{ticker} history {period} {interval}" : $"\"{scriptPath}\" {ticker} history {period} {interval}",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true,
+                    StandardOutputEncoding = System.Text.Encoding.UTF8
+                };
+
+                using (var process = new Process { StartInfo = startInfo })
+                {
+                    process.Start();
+                    var output = process.StandardOutput.ReadToEnd();
+                    process.WaitForExit(15000);
+
+                    var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                    if (lines.Length == 0 || lines[0] != "HISTORY_OK")
+                    {
+                        return false;
+                    }
+
+                    target.Clear();
+                    for (int i = 1; i < lines.Length; i++)
+                    {
+                        var parts = lines[i].Split('|');
+                        if (parts.Length < 6)
+                        {
+                            continue;
+                        }
+
+                        DateTime date;
+                        double open, high, low, close;
+                        long volume;
+                        if (!DateTime.TryParse(parts[0], out date)
+                            || !double.TryParse(parts[1], NumberStyles.Any, CultureInfo.InvariantCulture, out open)
+                            || !double.TryParse(parts[2], NumberStyles.Any, CultureInfo.InvariantCulture, out high)
+                            || !double.TryParse(parts[3], NumberStyles.Any, CultureInfo.InvariantCulture, out low)
+                            || !double.TryParse(parts[4], NumberStyles.Any, CultureInfo.InvariantCulture, out close)
+                            || !long.TryParse(parts[5], NumberStyles.Any, CultureInfo.InvariantCulture, out volume))
+                        {
+                            continue;
+                        }
+
+                        target.Add(new KLinePoint
+                        {
+                            Date = date,
+                            Open = open,
+                            High = high,
+                            Low = low,
+                            Close = close,
+                            Volume = volume
+                        });
+                    }
+
+                    return target.Count > 0;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private string ResolveYFinanceExecutablePathForKLine()
+        {
+            var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            var outputPath = IOPath.Combine(baseDir, "Python", "yfinance_fetcher.exe");
+            if (File.Exists(outputPath))
+            {
+                return outputPath;
+            }
+
+            var projectDistPath = IOPath.GetFullPath(IOPath.Combine(baseDir, "..", "..", "Python", "dist", "yfinance_fetcher.exe"));
+            if (File.Exists(projectDistPath))
+            {
+                return projectDistPath;
+            }
+
+            return outputPath;
+        }
+
+        private string ResolveYFinanceScriptPathForKLine()
+        {
+            var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            var outputPath = IOPath.Combine(baseDir, AppConfig.YFinanceScriptPath);
+            if (File.Exists(outputPath))
+            {
+                return outputPath;
+            }
+
+            var projectPath = IOPath.GetFullPath(IOPath.Combine(baseDir, "..", "..", AppConfig.YFinanceScriptPath));
+            if (File.Exists(projectPath))
+            {
+                return projectPath;
+            }
+
+            return outputPath;
+        }
+
+        private void DrawKLineChart(Canvas chartCanvas, List<KLinePoint> candles, string title)
+        {
+            chartCanvas.Children.Clear();
+            if (candles == null || candles.Count == 0)
+            {
+                return;
+            }
+
+            var width = chartCanvas.ActualWidth;
+            if (width < 320)
+            {
+                width = 820;
+            }
+
+            var height = chartCanvas.Height;
+            var chartLeft = 56.0;
+            var chartRight = width - 16.0;
+            var priceTop = 26.0;
+            var priceBottom = height * 0.65;
+            var volumeTop = priceBottom + 20.0;
+            var volumeBottom = height - 20.0;
+
+            var recent = candles.Skip(Math.Max(0, candles.Count - 45)).ToList();
+            var maxPrice = recent.Max(x => x.High);
+            var minPrice = recent.Min(x => x.Low);
+            var range = Math.Max(0.01, maxPrice - minPrice);
+            var spacing = Math.Max(4.0, (chartRight - chartLeft) / Math.Max(1, recent.Count));
+            var bodyWidth = Math.Max(2.0, spacing * 0.6);
+            var maxVolume = Math.Max(1L, recent.Max(x => x.Volume));
+
+            Func<double, double> mapPriceToY = price =>
+                priceBottom - ((price - minPrice) / range) * (priceBottom - priceTop);
+
+            var gridBrush = new SolidColorBrush(Color.FromRgb(230, 230, 230));
+            var axisBrush = new SolidColorBrush(Color.FromRgb(120, 120, 120));
+
+            for (int i = 0; i <= 4; i++)
+            {
+                var ratio = i / 4.0;
+                var y = priceTop + ratio * (priceBottom - priceTop);
+                var priceLabel = maxPrice - ratio * range;
+
+                chartCanvas.Children.Add(new Line
+                {
+                    X1 = chartLeft,
+                    Y1 = y,
+                    X2 = chartRight,
+                    Y2 = y,
+                    Stroke = gridBrush,
+                    StrokeThickness = 1
+                });
+
+                var yText = new TextBlock
+                {
+                    Text = priceLabel.ToString("F2"),
+                    FontSize = 10,
+                    Foreground = Brushes.DimGray
+                };
+                Canvas.SetLeft(yText, 4);
+                Canvas.SetTop(yText, y - 8);
+                chartCanvas.Children.Add(yText);
+            }
+
+            chartCanvas.Children.Add(new Line { X1 = chartLeft, Y1 = priceTop, X2 = chartLeft, Y2 = priceBottom, Stroke = axisBrush, StrokeThickness = 1 });
+            chartCanvas.Children.Add(new Line { X1 = chartLeft, Y1 = priceBottom, X2 = chartRight, Y2 = priceBottom, Stroke = axisBrush, StrokeThickness = 1 });
+            chartCanvas.Children.Add(new Line { X1 = chartLeft, Y1 = volumeTop, X2 = chartLeft, Y2 = volumeBottom, Stroke = axisBrush, StrokeThickness = 1 });
+            chartCanvas.Children.Add(new Line { X1 = chartLeft, Y1 = volumeBottom, X2 = chartRight, Y2 = volumeBottom, Stroke = axisBrush, StrokeThickness = 1 });
+
+            var xTickCount = Math.Min(6, recent.Count);
+            var hasIntraday = recent.Select(x => x.Date.Date).Distinct().Count() <= 1;
+            if (xTickCount > 1)
+            {
+                for (int i = 0; i < xTickCount; i++)
+                {
+                    var idx = (int)Math.Round(i * (recent.Count - 1) / (double)(xTickCount - 1));
+                    var x = chartLeft + idx * spacing + bodyWidth / 2;
+
+                    chartCanvas.Children.Add(new Line
+                    {
+                        X1 = x,
+                        Y1 = priceBottom,
+                        X2 = x,
+                        Y2 = priceBottom + 4,
+                        Stroke = axisBrush,
+                        StrokeThickness = 1
+                    });
+
+                    var dateText = new TextBlock
+                    {
+                        Text = hasIntraday ? recent[idx].Date.ToString("HH:mm") : recent[idx].Date.ToString("MM/dd"),
+                        FontSize = 9,
+                        Foreground = Brushes.DimGray
+                    };
+                    Canvas.SetLeft(dateText, x - 16);
+                    Canvas.SetTop(dateText, priceBottom + 4);
+                    chartCanvas.Children.Add(dateText);
+                }
+            }
+
+            chartCanvas.Children.Add(new TextBlock
+            {
+                Text = "成交量",
+                FontSize = 10,
+                Foreground = Brushes.DimGray
+            });
+            Canvas.SetLeft(chartCanvas.Children[chartCanvas.Children.Count - 1], 4);
+            Canvas.SetTop(chartCanvas.Children[chartCanvas.Children.Count - 1], volumeTop - 2);
+
+            var titleBlock = new TextBlock
+            {
+                Text = $"K線（近{recent.Count}日） {title}",
+                FontSize = 12,
+                FontWeight = FontWeights.Bold,
+                Foreground = Brushes.DimGray
+            };
+            Canvas.SetLeft(titleBlock, chartLeft);
+            Canvas.SetTop(titleBlock, 0);
+            chartCanvas.Children.Add(titleBlock);
+
+            for (int i = 0; i < recent.Count; i++)
+            {
+                var c = recent[i];
+                var x = chartLeft + i * spacing;
+                var openY = mapPriceToY(c.Open);
+                var closeY = mapPriceToY(c.Close);
+                var highY = mapPriceToY(c.High);
+                var lowY = mapPriceToY(c.Low);
+                var tooltipText =
+                    $"時間: {c.Date:yyyy-MM-dd HH:mm}\n" +
+                    $"開: {c.Open:F2}\n" +
+                    $"高: {c.High:F2}\n" +
+                    $"低: {c.Low:F2}\n" +
+                    $"收: {c.Close:F2}\n" +
+                    $"量: {c.Volume:N0}";
+
+                var isUp = c.Close >= c.Open;
+                var stroke = isUp ? new SolidColorBrush(Color.FromRgb(56, 142, 60)) : new SolidColorBrush(Color.FromRgb(211, 47, 47));
+                var fill = isUp ? new SolidColorBrush(Color.FromRgb(102, 187, 106)) : new SolidColorBrush(Color.FromRgb(239, 83, 80));
+
+                var wick = new Line
+                {
+                    X1 = x + bodyWidth / 2,
+                    Y1 = highY,
+                    X2 = x + bodyWidth / 2,
+                    Y2 = lowY,
+                    Stroke = stroke,
+                    StrokeThickness = 1
+                };
+                ToolTipService.SetToolTip(wick, tooltipText);
+                chartCanvas.Children.Add(wick);
+
+                var body = new Rectangle
+                {
+                    Width = bodyWidth,
+                    Height = Math.Max(1, Math.Abs(closeY - openY)),
+                    Fill = fill,
+                    Stroke = stroke,
+                    StrokeThickness = 1
+                };
+                ToolTipService.SetToolTip(body, tooltipText);
+                Canvas.SetLeft(body, x);
+                Canvas.SetTop(body, Math.Min(openY, closeY));
+                chartCanvas.Children.Add(body);
+
+                var volumeHeight = (c.Volume / (double)maxVolume) * (volumeBottom - volumeTop);
+                var volumeRect = new Rectangle
+                {
+                    Width = bodyWidth,
+                    Height = Math.Max(1, volumeHeight),
+                    Fill = fill,
+                    Opacity = 0.45
+                };
+                ToolTipService.SetToolTip(volumeRect, tooltipText);
+                Canvas.SetLeft(volumeRect, x);
+                Canvas.SetTop(volumeRect, volumeBottom - volumeRect.Height);
+                chartCanvas.Children.Add(volumeRect);
+
+                var hitArea = new Rectangle
+                {
+                    Width = Math.Max(spacing, bodyWidth + 2),
+                    Height = volumeBottom - priceTop,
+                    Fill = Brushes.Transparent
+                };
+                ToolTipService.SetToolTip(hitArea, tooltipText);
+                Canvas.SetLeft(hitArea, x - (Math.Max(spacing, bodyWidth + 2) - bodyWidth) / 2);
+                Canvas.SetTop(hitArea, priceTop);
+                chartCanvas.Children.Add(hitArea);
+            }
+
+            var ma5 = BuildMASeries(recent, 5);
+            var ma20 = BuildMASeries(recent, 20);
+
+            DrawMALine(chartCanvas, ma5, chartLeft, spacing, bodyWidth, mapPriceToY, Color.FromRgb(255, 193, 7));
+            DrawMALine(chartCanvas, ma20, chartLeft, spacing, bodyWidth, mapPriceToY, Color.FromRgb(103, 58, 183));
+
+            var legend = new TextBlock
+            {
+                Text = "MA5(黃)  MA20(紫)",
+                FontSize = 10,
+                Foreground = Brushes.DimGray
+            };
+            Canvas.SetLeft(legend, chartRight - 100);
+            Canvas.SetTop(legend, 4);
+            chartCanvas.Children.Add(legend);
+        }
+
+        private List<double?> BuildMASeries(List<KLinePoint> data, int period)
+        {
+            var result = new List<double?>();
+            for (int i = 0; i < data.Count; i++)
+            {
+                if (i < period - 1)
+                {
+                    result.Add(null);
+                    continue;
+                }
+
+                var avg = data.Skip(i - period + 1).Take(period).Average(x => x.Close);
+                result.Add(avg);
+            }
+            return result;
+        }
+
+        private void DrawMALine(
+            Canvas canvas,
+            List<double?> ma,
+            double chartLeft,
+            double spacing,
+            double bodyWidth,
+            Func<double, double> mapPriceToY,
+            Color color)
+        {
+            var polyline = new Polyline
+            {
+                Stroke = new SolidColorBrush(color),
+                StrokeThickness = 1.5
+            };
+
+            for (int i = 0; i < ma.Count; i++)
+            {
+                if (!ma[i].HasValue)
+                {
+                    continue;
+                }
+
+                var x = chartLeft + i * spacing + bodyWidth / 2;
+                var y = mapPriceToY(ma[i].Value);
+                polyline.Points.Add(new Point(x, y));
+            }
+
+            if (polyline.Points.Count > 1)
+            {
+                canvas.Children.Add(polyline);
+            }
+        }
+
+        private async System.Threading.Tasks.Task EnsureSectorYFinanceDataAsync()
+        {
+            if (TryApplyTodaySectorYFinanceCache())
+            {
+                UpdateNoPriceSummary();
+                UpdateDataStatusText();
+                return;
+            }
+
+            var progressWindow = new Window
+            {
+                Title = "族群漲跌載入中",
+                Owner = this,
+                Width = 420,
+                Height = 150,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                ResizeMode = ResizeMode.NoResize,
+                Background = Brushes.White
+            };
+
+            var progressText = new TextBlock
+            {
+                Margin = new Thickness(14, 14, 14, 8),
+                Text = "正在使用 yfinance 載入資料...",
+                FontWeight = FontWeights.Bold,
+                Foreground = new SolidColorBrush(Color.FromRgb(44, 62, 80))
+            };
+            var progressBar = new ProgressBar
+            {
+                Margin = new Thickness(14, 0, 14, 8),
+                Height = 10,
+                Minimum = 0,
+                Maximum = 100
+            };
+            var subText = new TextBlock
+            {
+                Margin = new Thickness(14, 0, 14, 0),
+                Foreground = new SolidColorBrush(Color.FromRgb(96, 125, 139)),
+                Text = "0/0"
+            };
+
+            var panel = new StackPanel();
+            panel.Children.Add(progressText);
+            panel.Children.Add(progressBar);
+            panel.Children.Add(subText);
+            progressWindow.Content = panel;
+            progressWindow.Show();
+
+            try
+            {
+                await System.Threading.Tasks.Task.Run(() =>
+                {
+                    RefreshAllStocksFromYFinance((current, total) =>
+                    {
+                        Dispatcher.BeginInvoke(new Action(() =>
+                        {
+                            progressBar.Value = current * 100.0 / Math.Max(1, total);
+                            subText.Text = $"{current}/{total}";
+                        }));
+                    });
+                });
+            }
+            finally
+            {
+                progressWindow.Close();
+            }
+
+            UpdateNoPriceSummary();
+            UpdateDataStatusText();
+        }
+
+        private bool TryApplyTodaySectorYFinanceCache()
+        {
+            try
+            {
+                if (!File.Exists(_twYFinanceSectorCacheFile))
+                {
+                    return false;
+                }
+
+                var json = File.ReadAllText(_twYFinanceSectorCacheFile);
+                var serializer = new JavaScriptSerializer();
+                var cache = serializer.Deserialize<SectorYFinanceCacheEnvelope>(json);
+                if (cache == null || cache.Items == null || cache.Items.Count == 0)
+                {
+                    return false;
+                }
+
+                if (!string.Equals(cache.Date, DateTime.Today.ToString("yyyy-MM-dd"), StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+
+                var latestUpdatedAt = cache.Items
+                    .Where(x => x.UpdatedAt.HasValue)
+                    .Select(x => x.UpdatedAt.Value)
+                    .OrderByDescending(x => x)
+                    .FirstOrDefault();
+                _lastYFinanceCacheUpdatedAt = latestUpdatedAt == default(DateTime) ? (DateTime?)null : latestUpdatedAt;
+
+                var map = cache.Items.ToDictionary(x => x.Ticker, StringComparer.OrdinalIgnoreCase);
+                foreach (var stock in _sourceStocks)
+                {
+                    SectorYFinanceCacheItem item;
+                    if (!map.TryGetValue(stock.Ticker, out item))
+                    {
+                        continue;
+                    }
+
+                    stock.Price = item.Price;
+                    stock.PreviousClose = item.PreviousClose;
+                    stock.ChangePercent = item.ChangePercent;
+                    stock.Source = "yfinance-cache";
+                    stock.UpdatedAt = item.UpdatedAt;
+                }
+
+                foreach (var sample in _sectorSamples)
+                {
+                    StockInfo stock;
+                    if ((stock = _sourceStocks.FirstOrDefault(x => string.Equals(x.Ticker, sample.Ticker, StringComparison.OrdinalIgnoreCase))) != null)
+                    {
+                        sample.ChangePercent = stock.ChangePercent;
+                    }
+                }
+
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void SaveSectorYFinanceCache(List<SectorYFinanceCacheItem> items)
+        {
+            try
+            {
+                if (!Directory.Exists(AppConfig.UserConfigDir))
+                {
+                    Directory.CreateDirectory(AppConfig.UserConfigDir);
+                }
+
+                var serializer = new JavaScriptSerializer();
+                var payload = new SectorYFinanceCacheEnvelope
+                {
+                    Date = DateTime.Today.ToString("yyyy-MM-dd"),
+                    Items = items ?? new List<SectorYFinanceCacheItem>()
+                };
+
+                File.WriteAllText(_twYFinanceSectorCacheFile, serializer.Serialize(payload), System.Text.Encoding.UTF8);
+            }
+            catch
+            {
+            }
+        }
+
+        private string NormalizeTwTicker(string ticker)
+        {
+            var normalized = (ticker ?? string.Empty).Trim().ToUpperInvariant();
+            if (!normalized.EndsWith(".TW", StringComparison.OrdinalIgnoreCase))
+            {
+                normalized += ".TW";
+            }
+            return normalized;
         }
 
         private void RefreshSectorStockRealtimePrices(List<SectorStockDetailItem> stocks, Action<int, int> onProgress)
@@ -745,10 +1566,45 @@ namespace StockManager
             {
                 Dispatcher.Invoke(() => txtDataStatus.Text = "資料來源：TWSE 全部上市股票 + Yahoo類股架構載入中...");
                 var loadedFromCsv = LoadSectorMappingFromCsv();
+                _loadedFromCsv = loadedFromCsv;
                 if (!loadedFromCsv)
                 {
                     var yahooSectorLinks = LoadYahooListedSectorFramework();
                     LoadYahooSectorConstituents(yahooSectorLinks);
+                }
+
+                _sourceStocks.Clear();
+                _sectorSamples.Clear();
+
+                var stockMap = new Dictionary<string, StockInfo>(StringComparer.OrdinalIgnoreCase);
+                var sectorSampleMap = new Dictionary<string, SectorSampleItem>(StringComparer.OrdinalIgnoreCase);
+
+                if (loadedFromCsv)
+                {
+                    foreach (var csvTicker in _tickerToCsvSector.Keys)
+                    {
+                        var ticker = NormalizeCsvTicker(csvTicker);
+                        if (string.IsNullOrWhiteSpace(ticker) || stockMap.ContainsKey(ticker))
+                        {
+                            continue;
+                        }
+
+                        var stock = new StockInfo(ticker, ticker)
+                        {
+                            Source = "CSV族群"
+                        };
+                        _sourceStocks.Add(stock);
+                        stockMap[ticker] = stock;
+
+                        var sample = new SectorSampleItem
+                        {
+                            Ticker = ticker,
+                            Industry = GetCsvSectorByTicker(ticker),
+                            Name = ticker
+                        };
+                        _sectorSamples.Add(sample);
+                        sectorSampleMap[ticker] = sample;
+                    }
                 }
 
                 var url = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL";
@@ -761,9 +1617,6 @@ namespace StockManager
 
                 var serializer = new JavaScriptSerializer();
                 var rows = serializer.Deserialize<List<Dictionary<string, string>>>(json) ?? new List<Dictionary<string, string>>();
-
-                _sourceStocks.Clear();
-                _sectorSamples.Clear();
 
                 foreach (var row in rows)
                 {
@@ -783,6 +1636,12 @@ namespace StockManager
                     row.TryGetValue("ClosingPrice", out closingPriceText);
                     row.TryGetValue("Change", out changeText);
 
+                    var isEtf = IsEtfTicker(ticker);
+                    if (loadedFromCsv && !stockMap.ContainsKey(ticker) && !isEtf)
+                    {
+                        continue;
+                    }
+
                     var close = ParseNumeric(closingPriceText);
                     var changeAmount = ParseNumeric(changeText);
                     double? previousClose = null;
@@ -797,29 +1656,44 @@ namespace StockManager
                         }
                     }
 
-                    var stock = new StockInfo(ticker, name)
+                    StockInfo stock;
+                    if (!stockMap.TryGetValue(ticker, out stock))
                     {
-                        Price = close,
-                        PreviousClose = previousClose,
-                        ChangePercent = changePercent,
-                        Source = "TWSE上市",
-                        UpdatedAt = DateTime.Now
-                    };
+                        stock = new StockInfo(ticker, name);
+                        _sourceStocks.Add(stock);
+                        stockMap[ticker] = stock;
+                    }
 
-                    _sourceStocks.Add(stock);
+                    stock.Name = name;
+                    stock.Price = close;
+                    stock.PreviousClose = previousClose;
+                    stock.ChangePercent = changePercent;
+                    stock.Source = "TWSE上市";
+                    stock.UpdatedAt = DateTime.Now;
 
-                    _sectorSamples.Add(new SectorSampleItem
+                    SectorSampleItem sample;
+                    if (!sectorSampleMap.TryGetValue(ticker, out sample))
                     {
-                        Ticker = ticker,
-                        Industry = industry,
-                        Name = name,
-                        ChangePercent = changePercent
-                    });
+                        sample = new SectorSampleItem { Ticker = ticker };
+                        _sectorSamples.Add(sample);
+                        sectorSampleMap[ticker] = sample;
+                    }
+
+                    var csvSector = loadedFromCsv ? GetCsvSectorByTicker(ticker) : null;
+                    sample.Industry = !string.IsNullOrWhiteSpace(csvSector)
+                        ? csvSector
+                        : (isEtf ? "ETF" : industry);
+                    sample.Name = name;
+                    sample.ChangePercent = changePercent;
                 }
 
-                Dispatcher.Invoke(() => txtDataStatus.Text = loadedFromCsv
-                    ? $"資料來源：TWSE 全部上市股票（{_sourceStocks.Count} 筆）｜CSV族群（{_csvSectorOrder.Count} 類，{_tickerToCsvSector.Count} 檔已對應）"
-                    : $"資料來源：TWSE 全部上市股票（{_sourceStocks.Count} 筆）｜Yahoo上市類股（{_yahooListedSectors.Count} 類，{_tickerToYahooSector.Count} 檔已對應）");
+                var cacheApplied = TryApplyTodaySectorYFinanceCache();
+                if (cacheApplied && _lastYFinanceCacheUpdatedAt.HasValue)
+                {
+                    _lastAutoYFinanceUpdateDate = _lastYFinanceCacheUpdatedAt.Value.Date;
+                }
+                UpdateNoPriceSummary();
+                UpdateDataStatusText();
             }
             catch (Exception ex)
             {
@@ -827,6 +1701,231 @@ namespace StockManager
                 Dispatcher.Invoke(() => MessageBox.Show($"載入全部上市台股失敗：{ex.Message}", "載入失敗", MessageBoxButton.OK, MessageBoxImage.Warning));
             }
 
+        }
+
+        private string NormalizeCsvTicker(string ticker)
+        {
+            var normalized = (ticker ?? string.Empty).Trim().ToUpperInvariant();
+            if (normalized.EndsWith(".TW", StringComparison.OrdinalIgnoreCase))
+            {
+                normalized = normalized.Substring(0, normalized.Length - 3);
+            }
+
+            return normalized;
+        }
+
+        private string GetCsvSectorByTicker(string ticker)
+        {
+            if (string.IsNullOrWhiteSpace(ticker))
+            {
+                return null;
+            }
+
+            string sector;
+            if (_tickerToCsvSector.TryGetValue(ticker, out sector))
+            {
+                return sector;
+            }
+
+            var twTicker = ticker.EndsWith(".TW", StringComparison.OrdinalIgnoreCase)
+                ? ticker
+                : ticker + ".TW";
+
+            if (_tickerToCsvSector.TryGetValue(twTicker, out sector))
+            {
+                return sector;
+            }
+
+            return null;
+        }
+
+        private bool IsEtfTicker(string ticker)
+        {
+            if (string.IsNullOrWhiteSpace(ticker))
+            {
+                return false;
+            }
+
+            var normalized = ticker.Trim().ToUpperInvariant();
+            if (normalized.EndsWith(".TW", StringComparison.OrdinalIgnoreCase))
+            {
+                normalized = normalized.Substring(0, normalized.Length - 3);
+            }
+
+            return Regex.IsMatch(normalized, "^00\\d+[A-Z]?$");
+        }
+
+        private void RefreshAllStocksFromYFinance(Action<int, int> onProgress)
+        {
+            var fetcher = new PriceFetcherService();
+            var tickers = _sourceStocks
+                .Select(x => NormalizeTwTicker(x.Ticker))
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var total = tickers.Count;
+
+            var completed = 0;
+            System.Threading.Tasks.Parallel.ForEach(
+                tickers,
+                new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = 4 },
+                ticker =>
+                {
+                    fetcher.UpdatePriceWithPreviousClose(ticker);
+                    var current = System.Threading.Interlocked.Increment(ref completed);
+                    onProgress?.Invoke(current, total);
+                });
+
+            var prices = fetcher.GetPrices();
+            var meta = fetcher.GetPriceMeta();
+            var cacheItems = new List<SectorYFinanceCacheItem>();
+
+            foreach (var stock in _sourceStocks)
+            {
+                var ticker = NormalizeTwTicker(stock.Ticker);
+                Tuple<double?, double?> priceTuple;
+                if (!prices.TryGetValue(ticker, out priceTuple))
+                {
+                    continue;
+                }
+
+                var price = priceTuple.Item1;
+                double? previousClose = null;
+                Dictionary<string, object> itemMeta;
+                if (meta.TryGetValue(ticker, out itemMeta) && itemMeta != null && itemMeta.ContainsKey("previous_close"))
+                {
+                    previousClose = itemMeta["previous_close"] as double?;
+                }
+
+                double? changePercent;
+                if (price.HasValue && previousClose.HasValue && Math.Abs(previousClose.Value) > 0.000001)
+                {
+                    changePercent = (price.Value - previousClose.Value) / previousClose.Value * 100;
+                }
+                else
+                {
+                    changePercent = priceTuple.Item2;
+                }
+
+                stock.Price = price;
+                stock.PreviousClose = previousClose;
+                stock.ChangePercent = changePercent;
+                stock.Source = "yfinance";
+                stock.UpdatedAt = DateTime.Now;
+
+                cacheItems.Add(new SectorYFinanceCacheItem
+                {
+                    Ticker = stock.Ticker,
+                    Price = stock.Price,
+                    PreviousClose = stock.PreviousClose,
+                    ChangePercent = stock.ChangePercent,
+                    UpdatedAt = stock.UpdatedAt
+                });
+            }
+
+            foreach (var sample in _sectorSamples)
+            {
+                var stock = _sourceStocks.FirstOrDefault(x => string.Equals(x.Ticker, sample.Ticker, StringComparison.OrdinalIgnoreCase));
+                sample.ChangePercent = stock?.ChangePercent;
+            }
+
+            SaveSectorYFinanceCache(cacheItems);
+            _lastYFinanceCacheUpdatedAt = DateTime.Now;
+        }
+
+        private void StartAutoYFinanceBackgroundUpdate()
+        {
+            if (_autoYFinanceUpdateTimer != null)
+            {
+                return;
+            }
+
+            _autoYFinanceUpdateTimer = new System.Windows.Threading.DispatcherTimer
+            {
+                Interval = TimeSpan.FromMinutes(5)
+            };
+            _autoYFinanceUpdateTimer.Tick += async (s, e) => await TryRunAutoYFinanceUpdateAsync();
+            _autoYFinanceUpdateTimer.Start();
+        }
+
+        private async System.Threading.Tasks.Task TryRunAutoYFinanceUpdateAsync()
+        {
+            if (_isAutoYFinanceUpdating || _sourceStocks.Count == 0)
+            {
+                return;
+            }
+
+            var now = DateTime.Now;
+            var updateStartTime = new TimeSpan(14, 0, 0);
+            if (now.TimeOfDay < updateStartTime)
+            {
+                return;
+            }
+
+            if (_lastAutoYFinanceUpdateDate.Date == now.Date)
+            {
+                return;
+            }
+
+            if (_lastYFinanceCacheUpdatedAt.HasValue
+                && _lastYFinanceCacheUpdatedAt.Value.Date == now.Date
+                && _lastYFinanceCacheUpdatedAt.Value.TimeOfDay >= updateStartTime)
+            {
+                _lastAutoYFinanceUpdateDate = now.Date;
+                UpdateDataStatusText();
+                return;
+            }
+
+            _isAutoYFinanceUpdating = true;
+            try
+            {
+                await System.Threading.Tasks.Task.Run(() => RefreshAllStocksFromYFinance(null));
+                _lastAutoYFinanceUpdateDate = now.Date;
+
+                UpdateNoPriceSummary();
+                ApplyFilter();
+                UpdateDataStatusText();
+            }
+            catch
+            {
+            }
+            finally
+            {
+                _isAutoYFinanceUpdating = false;
+            }
+        }
+
+        private void UpdateNoPriceSummary()
+        {
+            var noPriceStocks = _sourceStocks
+                .Where(x => !x.Price.HasValue)
+                .Select(x => x.Ticker)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            _noPriceSummary = noPriceStocks.Count > 0
+                ? $"｜無股價資料：{noPriceStocks.Count} 檔（例：{string.Join(",", noPriceStocks.Take(8))}）"
+                : string.Empty;
+        }
+
+        private void UpdateDataStatusText()
+        {
+            var yfinanceText = _lastYFinanceCacheUpdatedAt.HasValue
+                ? $"今日{_lastYFinanceCacheUpdatedAt.Value:HH:mm}已更新"
+                : "無";
+
+            var text = _loadedFromCsv
+                ? $"資料來源：CSV族群股票（{_sourceStocks.Count} 檔）｜TWSE補齊名稱｜yfinance暫存：{yfinanceText}{_noPriceSummary}"
+                : $"資料來源：TWSE 全部上市股票（{_sourceStocks.Count} 筆）｜Yahoo上市類股（{_yahooListedSectors.Count} 類，{_tickerToYahooSector.Count} 檔已對應）｜yfinance暫存：{yfinanceText}{_noPriceSummary}";
+
+            if (Dispatcher.CheckAccess())
+            {
+                txtDataStatus.Text = text;
+            }
+            else
+            {
+                Dispatcher.Invoke(() => txtDataStatus.Text = text);
+            }
         }
 
         private bool LoadSectorMappingFromCsv()
@@ -1063,10 +2162,35 @@ namespace StockManager
             public double? ChangePercent { get; set; }
         }
 
+        private class KLinePoint
+        {
+            public DateTime Date { get; set; }
+            public double Open { get; set; }
+            public double High { get; set; }
+            public double Low { get; set; }
+            public double Close { get; set; }
+            public long Volume { get; set; }
+        }
+
         private class YahooSectorLink
         {
             public string Name { get; set; }
             public string Url { get; set; }
+        }
+
+        private class SectorYFinanceCacheEnvelope
+        {
+            public string Date { get; set; }
+            public List<SectorYFinanceCacheItem> Items { get; set; }
+        }
+
+        private class SectorYFinanceCacheItem
+        {
+            public string Ticker { get; set; }
+            public double? Price { get; set; }
+            public double? PreviousClose { get; set; }
+            public double? ChangePercent { get; set; }
+            public DateTime? UpdatedAt { get; set; }
         }
 
         private string MapSectorCategory(string industry, string name, string ticker)

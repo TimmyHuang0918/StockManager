@@ -100,11 +100,23 @@
                                                           KeyDown="CboStockSwitcher_KeyDown"/>
                                         <TextBlock Text="時間週期：" Foreground="White" VerticalAlignment="Center" Margin="0,0,10,0"/>
                                         <ComboBox x:Name="cboPeriod" Width="130" Height="23" Style="{StaticResource PeriodComboBoxStyle}" SelectionChanged="CboPeriod_SelectionChanged">
+                                                <ComboBoxItem Content="5分K" Tag="5m" Style="{StaticResource PeriodComboBoxItemStyle}"/>
                                                 <ComboBoxItem Content="1個月" Tag="1mo" Style="{StaticResource PeriodComboBoxItemStyle}"/>
                                                 <ComboBoxItem Content="3個月" Tag="3mo" Style="{StaticResource PeriodComboBoxItemStyle}"/>
                                                 <ComboBoxItem Content="6個月" Tag="6mo" Style="{StaticResource PeriodComboBoxItemStyle}"/>
                                                 <ComboBoxItem Content="1年" Tag="1y" Style="{StaticResource PeriodComboBoxItemStyle}"/>
                                                 <ComboBoxItem Content="2年" Tag="2y" Style="{StaticResource PeriodComboBoxItemStyle}"/>
+                                        </ComboBox>
+                                        <Button x:Name="btnRealtimeKLine" Content="即時K線：關閉" Width="118" Height="30" Margin="10,0,0,0"
+                                                        Background="#546E7A" Foreground="White" BorderThickness="0" FontWeight="SemiBold"
+                                                        Click="BtnRealtimeKLine_Click"/>
+                                        <TextBlock x:Name="txtIntradayBarsLabel" Text="K棒數：" Foreground="White" VerticalAlignment="Center" Margin="10,0,6,0" Visibility="Collapsed"/>
+                                        <ComboBox x:Name="cboIntradayBars" Width="86" Height="23" Visibility="Collapsed"
+                                                          Style="{StaticResource PeriodComboBoxStyle}" SelectionChanged="CboIntradayBars_SelectionChanged">
+                                                <ComboBoxItem Content="30根" Tag="30" Style="{StaticResource PeriodComboBoxItemStyle}"/>
+                                                <ComboBoxItem Content="60根" Tag="60" Style="{StaticResource PeriodComboBoxItemStyle}"/>
+                                                <ComboBoxItem Content="120根" Tag="120" Style="{StaticResource PeriodComboBoxItemStyle}"/>
+                                                <ComboBoxItem Content="240根" Tag="240" Style="{StaticResource PeriodComboBoxItemStyle}"/>
                                         </ComboBox>
                                 </StackPanel>
                         </Grid>

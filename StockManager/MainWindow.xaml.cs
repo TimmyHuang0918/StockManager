@@ -182,7 +182,7 @@ namespace StockManager
                         {
                                 Title = "新增使用者",
                                 Width = 340,
-                                Height = 170,
+                                Height = 200,
                                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
                                 ResizeMode = ResizeMode.NoResize,
                                 Owner = this,
@@ -874,12 +874,12 @@ namespace StockManager
                         var realized = market == "US" ? _usRealizedPnL : _twRealizedPnL;
 
                         var text = market == "US"
-                                ? $"美股未實現：{totalPnl:F2} ({totalPnlPct:F2}%)"
-                                : $"台股未實現：{totalPnl:F2} ({totalPnlPct:F2}%)";
+                                ? $"美股未實現：{totalPnl:N2} ({totalPnlPct:F2}%)"
+                                : $"台股未實現：{totalPnl:N2} ({totalPnlPct:F2}%)";
 
                         var realizedText = market == "US"
-                                ? $"美股已實現：{realized:F2}"
-                                : $"台股已實現：{realized:F2}";
+                                ? $"美股已實現：{realized:N2}"
+                                : $"台股已實現：{realized:N2}";
 
                         if (market == "US")
                         {
