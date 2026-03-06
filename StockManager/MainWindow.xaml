@@ -199,7 +199,19 @@
                                                 <Button x:Name="btnTwFilter" Content="台股篩選" Width="90" Height="25" Margin="10,0,0,0"
                                                                 Click="BtnTwFilter_Click" Background="#607D8B" Foreground="White"
                                                                 FontWeight="Bold" BorderThickness="0" Cursor="Hand"/>
+                                                <Button x:Name="btnTwYFinanceCacheUpdate" Content="更新族群快取" Width="100" Height="25" Margin="8,0,0,0"
+                                                                Click="BtnTwYFinanceCacheUpdate_Click" Background="#455A64" Foreground="White"
+                                                                FontWeight="Bold" BorderThickness="0" Cursor="Hand"/>
                                                 <TextBlock Text="  股票代號或名稱" VerticalAlignment="Center" Foreground="Gray" Margin="10,0,0,0"/>
+                                                <ProgressBar x:Name="pbTwSectorCacheUpdate" Width="140" Height="12" Margin="12,0,0,0"
+                                                                Minimum="0" Maximum="100" Value="0" Visibility="Collapsed"
+                                                                Foreground="#1E88E5" VerticalAlignment="Center"/>
+                                                <TextBlock x:Name="txtTwSectorCachePercent" Text="0%" Margin="6,0,0,0"
+                                                                Foreground="#455A64" FontWeight="Bold" Visibility="Collapsed"
+                                                                VerticalAlignment="Center"/>
+                                                <TextBlock x:Name="txtTwSectorCacheEta" Text="預估剩餘 --:--" Margin="8,0,0,0"
+                                                                Foreground="#607D8B" Visibility="Collapsed"
+                                                                VerticalAlignment="Center"/>
                                                 </StackPanel>
                                         </Border>
 

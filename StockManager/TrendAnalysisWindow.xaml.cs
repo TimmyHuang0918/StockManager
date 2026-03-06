@@ -39,6 +39,7 @@ namespace StockManager
                 private System.Windows.Threading.DispatcherTimer _realtimeKLineTimer;
                 private bool _isRealtimeKLineMode;
                 private bool _isRealtimeKLineRefreshing;
+                private double? _lastDisplayedPrice;
 
                 public TrendAnalysisWindow(string ticker, string stockName, PriceFetcherService priceFetcher)
                 {
@@ -475,8 +476,19 @@ namespace StockManager
 
                                 if (currentPrice.HasValue)
                                 {
+                                        var hasPriceChanged = !_lastDisplayedPrice.HasValue || Math.Abs(_lastDisplayedPrice.Value - currentPrice.Value) > 0.000001;
+                                        _lastDisplayedPrice = currentPrice.Value;
+
                                         txtCurrentPrice.Text = $"${currentPrice.Value:F2}";
                                         Console.WriteLine($"[趨勢視窗] 已設置當前價格: {txtCurrentPrice.Text}");
+
+                                        if (hasPriceChanged)
+                                        {
+                                                var normalBrush = txtCurrentPrice.Foreground ?? new SolidColorBrush(Color.FromRgb(38, 50, 56));
+                                                txtCurrentPrice.Foreground = Brushes.White;
+                                                await Task.Delay(140);
+                                                txtCurrentPrice.Foreground = normalBrush;
+                                        }
 
                                         if (changePercent.HasValue && txtChange != null)
                                         {
@@ -1132,6 +1144,52 @@ namespace StockManager
                                         Canvas.SetLeft(yLabel, 2);
                                         Canvas.SetTop(yLabel, y - 8);
                                         chartCanvas.Children.Add(yLabel);
+                                }
+
+                                if (_isRealtimeKLineMode && displayData.Count > 0)
+                                {
+                                        var latestCandle = displayData.Last();
+                                        var latestPrice = latestCandle.Close;
+                                        var realtimeColor = latestCandle.Close >= latestCandle.Open
+                                                ? Color.FromRgb(76, 175, 80)
+                                                : Color.FromRgb(244, 67, 54);
+                                        if (txtCurrentPrice != null)
+                                        {
+                                                var priceText = (txtCurrentPrice.Text ?? string.Empty).Replace("$", string.Empty).Trim();
+                                                double parsed;
+                                                if (double.TryParse(priceText, NumberStyles.Any, CultureInfo.InvariantCulture, out parsed)
+                                                        || double.TryParse(priceText, NumberStyles.Any, CultureInfo.CurrentCulture, out parsed))
+                                                {
+                                                        latestPrice = parsed;
+                                                }
+                                        }
+
+                                        var priceY = chartBottom - ((latestPrice - minPrice) / priceRange) * (chartBottom - chartTop);
+                                        priceY = Math.Max(chartTop, Math.Min(chartBottom, priceY));
+
+                                        var realtimePriceLine = new Line
+                                        {
+                                                X1 = chartLeft,
+                                                Y1 = priceY,
+                                                X2 = chartRight,
+                                                Y2 = priceY,
+                                                Stroke = new SolidColorBrush(realtimeColor),
+                                                StrokeThickness = 1.2,
+                                                StrokeDashArray = new DoubleCollection { 4, 3 }
+                                        };
+                                        chartCanvas.Children.Add(realtimePriceLine);
+
+                                        var realtimePriceText = new TextBlock
+                                        {
+                                                Text = latestPrice.ToString("F2"),
+                                                FontSize = 10,
+                                                FontWeight = FontWeights.Bold,
+                                                Foreground = new SolidColorBrush(realtimeColor),
+                                                Background = Brushes.White
+                                        };
+                                        Canvas.SetLeft(realtimePriceText, chartRight + 2);
+                                        Canvas.SetTop(realtimePriceText, priceY - 8);
+                                        chartCanvas.Children.Add(realtimePriceText);
                                 }
 
                                 // X 軸刻度與日期標籤

@@ -56,8 +56,6 @@ namespace StockManager
         {
             await System.Threading.Tasks.Task.Run(() => LoadAllListedTwStocks());
             ApplyFilter();
-            StartAutoYFinanceBackgroundUpdate();
-            await TryRunAutoYFinanceUpdateAsync();
         }
 
         private void TwStockFilterWindow_Closed(object sender, EventArgs e)
@@ -1314,66 +1312,10 @@ namespace StockManager
                 return;
             }
 
-            var progressWindow = new Window
+            await Dispatcher.BeginInvoke(new Action(() =>
             {
-                Title = "族群漲跌載入中",
-                Owner = this,
-                Width = 420,
-                Height = 150,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                ResizeMode = ResizeMode.NoResize,
-                Background = Brushes.White
-            };
-
-            var progressText = new TextBlock
-            {
-                Margin = new Thickness(14, 14, 14, 8),
-                Text = "正在使用 yfinance 載入資料...",
-                FontWeight = FontWeights.Bold,
-                Foreground = new SolidColorBrush(Color.FromRgb(44, 62, 80))
-            };
-            var progressBar = new ProgressBar
-            {
-                Margin = new Thickness(14, 0, 14, 8),
-                Height = 10,
-                Minimum = 0,
-                Maximum = 100
-            };
-            var subText = new TextBlock
-            {
-                Margin = new Thickness(14, 0, 14, 0),
-                Foreground = new SolidColorBrush(Color.FromRgb(96, 125, 139)),
-                Text = "0/0"
-            };
-
-            var panel = new StackPanel();
-            panel.Children.Add(progressText);
-            panel.Children.Add(progressBar);
-            panel.Children.Add(subText);
-            progressWindow.Content = panel;
-            progressWindow.Show();
-
-            try
-            {
-                await System.Threading.Tasks.Task.Run(() =>
-                {
-                    RefreshAllStocksFromYFinance((current, total) =>
-                    {
-                        Dispatcher.BeginInvoke(new Action(() =>
-                        {
-                            progressBar.Value = current * 100.0 / Math.Max(1, total);
-                            subText.Text = $"{current}/{total}";
-                        }));
-                    });
-                });
-            }
-            finally
-            {
-                progressWindow.Close();
-            }
-
-            UpdateNoPriceSummary();
-            UpdateDataStatusText();
+                MessageBox.Show("尚未找到今日台股 yfinance 快取，請回主頁面點擊「更新台股快取」。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            }));
         }
 
         private bool TryApplyTodaySectorYFinanceCache()

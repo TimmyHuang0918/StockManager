@@ -19,6 +19,7 @@ using System.Net;
 using System.Web.Script.Serialization;
 using System.Windows.Threading;
 using System.Xml.Linq;
+using System.Diagnostics;
 using StockManager.Models;
 using StockManager.Services;
 using StockManager.Config;
@@ -1193,6 +1194,222 @@ namespace StockManager
                         var filterWindow = new TwStockFilterWindow();
                         filterWindow.Owner = this;
                         filterWindow.Show();
+                }
+
+                private async void BtnTwYFinanceCacheUpdate_Click(object sender, RoutedEventArgs e)
+                {
+                        var button = sender as Button;
+                        var cacheProgressBar = FindName("pbTwSectorCacheUpdate") as ProgressBar;
+                        var cachePercentText = FindName("txtTwSectorCachePercent") as TextBlock;
+                        var cacheEtaText = FindName("txtTwSectorCacheEta") as TextBlock;
+                        if (button != null)
+                        {
+                                button.IsEnabled = false;
+                        }
+
+                        if (cacheProgressBar != null)
+                        {
+                                cacheProgressBar.Value = 0;
+                                cacheProgressBar.Visibility = Visibility.Visible;
+                        }
+                        if (cachePercentText != null)
+                        {
+                                cachePercentText.Text = "0%";
+                                cachePercentText.Visibility = Visibility.Visible;
+                        }
+                        if (cacheEtaText != null)
+                        {
+                                cacheEtaText.Text = "預估剩餘 --:--";
+                                cacheEtaText.Visibility = Visibility.Visible;
+                        }
+
+                        statusText.Text = "台股族群 yfinance 快取更新中...";
+
+                        try
+                        {
+                                var tickers = LoadTwSectorUniverseTickersForCache();
+                                if (tickers.Count == 0)
+                                {
+                                        throw new InvalidOperationException("找不到可更新的台股族群股票清單。");
+                                }
+
+                                await Task.Run(() =>
+                                {
+                                        var total = Math.Max(1, tickers.Count);
+                                        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+                                        for (int i = 0; i < tickers.Count; i++)
+                                        {
+                                                var t = tickers[i];
+                                                var normalized = t.EndsWith(".TW", StringComparison.OrdinalIgnoreCase) ? t : (t + ".TW");
+                                                _twPriceFetcher.UpdatePriceWithPreviousClose(normalized);
+
+                                                var percent = (i + 1) * 100.0 / total;
+                                                var elapsed = stopwatch.Elapsed.TotalSeconds;
+                                                var avgPerItem = elapsed / Math.Max(1, i + 1);
+                                                var remainingSeconds = Math.Max(0, (total - (i + 1)) * avgPerItem);
+                                                var eta = TimeSpan.FromSeconds(remainingSeconds);
+                                                Dispatcher.BeginInvoke(new Action(() =>
+                                                {
+                                                        if (cacheProgressBar != null)
+                                                        {
+                                                                cacheProgressBar.Value = percent;
+                                                        }
+                                                        if (cachePercentText != null)
+                                                        {
+                                                                cachePercentText.Text = $"{percent:F0}%";
+                                                        }
+                                                        if (cacheEtaText != null)
+                                                        {
+                                                                cacheEtaText.Text = $"預估剩餘 {eta:mm\\:ss}";
+                                                        }
+                                                }));
+
+                                                System.Threading.Thread.Sleep(80);
+                                        }
+                                });
+
+                                var prices = _twPriceFetcher.GetPrices();
+                                var meta = _twPriceFetcher.GetPriceMeta();
+                                var cacheItems = new List<Dictionary<string, object>>();
+
+                                foreach (var t in tickers)
+                                {
+                                        var normalized = t.EndsWith(".TW", StringComparison.OrdinalIgnoreCase) ? t : (t + ".TW");
+                                        Tuple<double?, double?> priceTuple;
+                                        if (!prices.TryGetValue(normalized, out priceTuple))
+                                        {
+                                                continue;
+                                        }
+
+                                        var currentPrice = priceTuple.Item1;
+                                        double? previousClose = null;
+                                        Dictionary<string, object> itemMeta;
+                                        if (meta.TryGetValue(normalized, out itemMeta) && itemMeta != null && itemMeta.ContainsKey("previous_close"))
+                                        {
+                                                previousClose = itemMeta["previous_close"] as double?;
+                                        }
+
+                                        double? changePercent;
+                                        if (currentPrice.HasValue && previousClose.HasValue && Math.Abs(previousClose.Value) > 0.000001)
+                                        {
+                                                changePercent = (currentPrice.Value - previousClose.Value) / previousClose.Value * 100;
+                                        }
+                                        else
+                                        {
+                                                changePercent = priceTuple.Item2;
+                                        }
+
+                                        cacheItems.Add(new Dictionary<string, object>
+                                        {
+                                                { "Ticker", t.EndsWith(".TW", StringComparison.OrdinalIgnoreCase) ? t.Substring(0, t.Length - 3) : t },
+                                                { "Price", currentPrice },
+                                                { "PreviousClose", previousClose },
+                                                { "ChangePercent", changePercent },
+                                                { "UpdatedAt", DateTime.Now }
+                                        });
+                                }
+
+                                if (!Directory.Exists(AppConfig.UserConfigDir))
+                                {
+                                        Directory.CreateDirectory(AppConfig.UserConfigDir);
+                                }
+
+                                var payload = new Dictionary<string, object>
+                                {
+                                        { "Date", DateTime.Today.ToString("yyyy-MM-dd") },
+                                        { "Items", cacheItems }
+                                };
+
+                                var serializer = new JavaScriptSerializer();
+                                var cacheFile = System.IO.Path.Combine(AppConfig.UserConfigDir, "tw_sector_yfinance_cache.json");
+                                File.WriteAllText(cacheFile, serializer.Serialize(payload), Encoding.UTF8);
+
+                                statusText.Text = $"✅ 台股族群 yfinance 快取已更新（{cacheItems.Count} 檔）";
+                                if (cachePercentText != null)
+                                {
+                                        cachePercentText.Text = "100%";
+                                }
+                                if (cacheEtaText != null)
+                                {
+                                        cacheEtaText.Text = "預估剩餘 00:00";
+                                }
+                                MessageBox.Show($"台股族群 yfinance 快取更新完成，共 {cacheItems.Count} 檔。", "更新完成", MessageBoxButton.OK, MessageBoxImage.Information);
+                        }
+                        catch (Exception ex)
+                        {
+                                statusText.Text = "❌ 台股族群 yfinance 快取更新失敗";
+                                MessageBox.Show($"更新台股族群 yfinance 快取失敗：{ex.Message}", "更新失敗", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        }
+                        finally
+                        {
+                                if (cacheProgressBar != null)
+                                {
+                                        cacheProgressBar.Visibility = Visibility.Collapsed;
+                                }
+                                if (cachePercentText != null)
+                                {
+                                        cachePercentText.Visibility = Visibility.Collapsed;
+                                }
+                                if (cacheEtaText != null)
+                                {
+                                        cacheEtaText.Visibility = Visibility.Collapsed;
+                                }
+
+                                if (button != null)
+                                {
+                                        button.IsEnabled = true;
+                                }
+                        }
+                }
+
+                private List<string> LoadTwSectorUniverseTickersForCache()
+                {
+                        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                        List<string> sectorOrder;
+                        Dictionary<string, string> tickerToSector;
+                        if (AppConfig.TryLoadTaiwanSectorCsv(out sectorOrder, out tickerToSector) && tickerToSector != null)
+                        {
+                                foreach (var t in tickerToSector.Keys)
+                                {
+                                        var normalized = (t ?? string.Empty).Trim().ToUpperInvariant();
+                                        if (normalized.EndsWith(".TW", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                                normalized = normalized.Substring(0, normalized.Length - 3);
+                                        }
+
+                                        if (!string.IsNullOrWhiteSpace(normalized))
+                                        {
+                                                result.Add(normalized);
+                                        }
+                                }
+                        }
+
+                        try
+                        {
+                                var url = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL";
+                                using (var client = new WebClient())
+                                {
+                                        client.Encoding = Encoding.UTF8;
+                                        var json = client.DownloadString(url);
+                                        var serializer = new JavaScriptSerializer();
+                                        var rows = serializer.Deserialize<List<Dictionary<string, string>>>(json) ?? new List<Dictionary<string, string>>();
+
+                                        foreach (var row in rows)
+                                        {
+                                                string code;
+                                                if (row.TryGetValue("Code", out code) && !string.IsNullOrWhiteSpace(code))
+                                                {
+                                                        result.Add(code.Trim().ToUpperInvariant());
+                                                }
+                                        }
+                                }
+                        }
+                        catch
+                        {
+                        }
+
+                        return result.OrderBy(x => x).ToList();
                 }
 
                 private void BtnUsAddHolding_Click(object sender, RoutedEventArgs e)
