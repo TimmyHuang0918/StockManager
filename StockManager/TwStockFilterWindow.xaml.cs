@@ -20,7 +20,7 @@ using IOPath = System.IO.Path;
 
 namespace StockManager
 {
-    public partial class TwStockFilterWindow : Window
+    public partial class TwStockFilterWindow : UserControl
     {
         private static readonly string[] YahooSectorFallback = new[]
         {
@@ -49,7 +49,7 @@ namespace StockManager
             InitializeComponent();
             dgFilteredTwStocks.ItemsSource = _filteredStocks;
             Loaded += TwStockFilterWindow_Loaded;
-            Closed += TwStockFilterWindow_Closed;
+            Unloaded += TwStockFilterWindow_Unloaded;
         }
 
         private async void TwStockFilterWindow_Loaded(object sender, RoutedEventArgs e)
@@ -58,7 +58,7 @@ namespace StockManager
             ApplyFilter();
         }
 
-        private void TwStockFilterWindow_Closed(object sender, EventArgs e)
+        private void TwStockFilterWindow_Unloaded(object sender, RoutedEventArgs e)
         {
             if (_autoYFinanceUpdateTimer != null)
             {
@@ -160,7 +160,11 @@ namespace StockManager
                 _filteredStocks.Add(stock);
             }
 
-            Title = $"台股篩選（{_filteredStocks.Count} 筆）";
+            var hostWindow = Window.GetWindow(this);
+            if (hostWindow != null)
+            {
+                hostWindow.Title = $"股票監控系統 - Stock Manager | 台股篩選（{_filteredStocks.Count} 筆）";
+            }
         }
 
         private async void BtnSectorOverview_Click(object sender, RoutedEventArgs e)
@@ -221,16 +225,17 @@ namespace StockManager
             var grid = new DataGrid
             {
                 AutoGenerateColumns = false,
-                IsReadOnly = true,
+                IsReadOnly = false,
                 CanUserAddRows = false,
                 HeadersVisibility = DataGridHeadersVisibility.Column,
-                AlternatingRowBackground = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#F7FAFF"),
-                RowBackground = System.Windows.Media.Brushes.White,
+                AlternatingRowBackground = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#24334A"),
+                RowBackground = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#1F2A3D"),
                 GridLinesVisibility = DataGridGridLinesVisibility.Horizontal,
-                HorizontalGridLinesBrush = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#E6ECF2"),
-                VerticalGridLinesBrush = System.Windows.Media.Brushes.Transparent,
+                HorizontalGridLinesBrush = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#32445E"),
+                VerticalGridLinesBrush = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#32445E"),
                 BorderThickness = new Thickness(0),
-                Background = System.Windows.Media.Brushes.White,
+                Background = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#1F2A3D"),
+                Foreground = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#E3ECF5"),
                 ItemsSource = summary,
                 Margin = new Thickness(0)
             };
@@ -311,11 +316,11 @@ namespace StockManager
             var win = new Window
             {
                 Title = "台股族群漲跌總覽（點擊族群看成分股）",
-                Owner = this,
+                Owner = Window.GetWindow(this),
                 Width = 760,
                 Height = 560,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Background = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#F3F6FA")
+                Background = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#121722")
             };
 
             var layoutRoot = new Grid { Margin = new Thickness(12) };
@@ -339,8 +344,8 @@ namespace StockManager
 
             var contentBorder = new Border
             {
-                Background = System.Windows.Media.Brushes.White,
-                BorderBrush = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#D9E2EC"),
+                Background = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#1B2433"),
+                BorderBrush = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#2E3A4F"),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(8),
                 Padding = new Thickness(8),
@@ -396,13 +401,14 @@ namespace StockManager
                 IsReadOnly = true,
                 CanUserAddRows = false,
                 HeadersVisibility = DataGridHeadersVisibility.Column,
-                AlternatingRowBackground = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#F7FAFF"),
-                RowBackground = System.Windows.Media.Brushes.White,
+                AlternatingRowBackground = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#24334A"),
+                RowBackground = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#1F2A3D"),
                 GridLinesVisibility = DataGridGridLinesVisibility.Horizontal,
-                HorizontalGridLinesBrush = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#E6ECF2"),
-                VerticalGridLinesBrush = System.Windows.Media.Brushes.Transparent,
+                HorizontalGridLinesBrush = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#32445E"),
+                VerticalGridLinesBrush = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#32445E"),
                 BorderThickness = new Thickness(0),
-                Background = System.Windows.Media.Brushes.White,
+                Background = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#1F2A3D"),
+                Foreground = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#E3ECF5"),
                 ItemsSource = sorted,
                 Margin = new Thickness(0)
             };
@@ -428,13 +434,40 @@ namespace StockManager
                 }
             };
 
-            grid.Columns.Add(new DataGridTextColumn { Header = "股票代號", Binding = new System.Windows.Data.Binding("Ticker"), Width = 110 });
-            grid.Columns.Add(new DataGridTextColumn { Header = "公司名稱", Binding = new System.Windows.Data.Binding("Name"), Width = 180 });
-            grid.Columns.Add(new DataGridTextColumn { Header = "股價", Binding = new System.Windows.Data.Binding("Price") { StringFormat = "{0:F2}" }, Width = 110 });
+            Action requestRefreshKLine = null;
+
+            var klineCheckColumn = new DataGridTemplateColumn { Header = "K線", Width = 60 };
+            var klineCheckFactory = new FrameworkElementFactory(typeof(CheckBox));
+            klineCheckFactory.SetValue(CheckBox.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+            klineCheckFactory.SetValue(CheckBox.VerticalAlignmentProperty, VerticalAlignment.Center);
+            klineCheckFactory.SetBinding(CheckBox.IsCheckedProperty, new System.Windows.Data.Binding("IsKLineVisible")
+            {
+                Mode = System.Windows.Data.BindingMode.TwoWay,
+                UpdateSourceTrigger = System.Windows.Data.UpdateSourceTrigger.PropertyChanged
+            });
+            klineCheckFactory.AddHandler(CheckBox.CheckedEvent, new RoutedEventHandler((s, e) =>
+            {
+                if (requestRefreshKLine != null)
+                {
+                    Dispatcher.BeginInvoke(new Action(requestRefreshKLine));
+                }
+            }));
+            klineCheckFactory.AddHandler(CheckBox.UncheckedEvent, new RoutedEventHandler((s, e) =>
+            {
+                if (requestRefreshKLine != null)
+                {
+                    Dispatcher.BeginInvoke(new Action(requestRefreshKLine));
+                }
+            }));
+            klineCheckColumn.CellTemplate = new DataTemplate { VisualTree = klineCheckFactory };
+            grid.Columns.Add(klineCheckColumn);
+            grid.Columns.Add(new DataGridTextColumn { Header = "股票代號", Binding = new System.Windows.Data.Binding("Ticker"), Width = 110, IsReadOnly = true });
+            grid.Columns.Add(new DataGridTextColumn { Header = "公司名稱", Binding = new System.Windows.Data.Binding("Name"), Width = 180, IsReadOnly = true });
+            grid.Columns.Add(new DataGridTextColumn { Header = "股價", Binding = new System.Windows.Data.Binding("Price") { StringFormat = "{0:F2}" }, Width = 110, IsReadOnly = true });
 
             var positiveNegativeConverter = new PositiveNegativeConverter();
 
-            var changeAmountColumn = new DataGridTemplateColumn { Header = "漲跌", Width = 100 };
+            var changeAmountColumn = new DataGridTemplateColumn { Header = "漲跌", Width = 100, IsReadOnly = true };
             var changeAmountText = new FrameworkElementFactory(typeof(TextBlock));
             changeAmountText.SetBinding(TextBlock.TextProperty, new System.Windows.Data.Binding("ChangeAmount") { StringFormat = "{0:F2}" });
             changeAmountText.SetValue(TextBlock.FontWeightProperty, FontWeights.Bold);
@@ -476,7 +509,7 @@ namespace StockManager
             changeAmountColumn.CellTemplate = new DataTemplate { VisualTree = changeAmountText };
             grid.Columns.Add(changeAmountColumn);
 
-            var changePercentColumn = new DataGridTemplateColumn { Header = "漲跌幅(%)", Width = 110 };
+            var changePercentColumn = new DataGridTemplateColumn { Header = "漲跌幅(%)", Width = 110, IsReadOnly = true };
             var changePercentText = new FrameworkElementFactory(typeof(TextBlock));
             changePercentText.SetBinding(TextBlock.TextProperty, new System.Windows.Data.Binding("ChangePercent") { StringFormat = "{0:F2}" });
             changePercentText.SetValue(TextBlock.FontWeightProperty, FontWeights.Bold);
@@ -544,7 +577,7 @@ namespace StockManager
                     return;
                 }
 
-                var mainWindow = Owner as MainWindow;
+                var mainWindow = Window.GetWindow(this) as MainWindow;
                 if (mainWindow == null)
                 {
                     MessageBox.Show("找不到主頁面視窗，無法加入清單。", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -563,17 +596,18 @@ namespace StockManager
             var detailWindow = new Window
             {
                 Title = $"{sectorName} 成分股（{sorted.Count} 檔）",
-                Owner = this,
+                Owner = Window.GetWindow(this),
                 Width = 900,
                 Height = 760,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Background = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#F3F6FA")
+                Background = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#121722")
             };
 
             var layoutRoot = new Grid { Margin = new Thickness(12) };
             layoutRoot.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            layoutRoot.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            layoutRoot.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star), MinHeight = 220 });
             layoutRoot.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            layoutRoot.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star), MinHeight = 220 });
 
             var headerPanel = new Border
             {
@@ -618,8 +652,8 @@ namespace StockManager
 
             var contentBorder = new Border
             {
-                Background = System.Windows.Media.Brushes.White,
-                BorderBrush = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#D9E2EC"),
+                Background = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#1B2433"),
+                BorderBrush = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#2E3A4F"),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(8),
                 Padding = new Thickness(8),
@@ -712,28 +746,44 @@ namespace StockManager
             controlPanel.Children.Add(period1YButton);
             controlPanel.Children.Add(realtimeStatusText);
 
-            var klineCanvas = new Canvas
+            var klineContainer = new StackPanel
             {
-                Height = 250,
-                Background = Brushes.White,
-                ClipToBounds = true
+                Orientation = Orientation.Vertical
             };
+
+            var klineScrollViewer = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                Content = klineContainer
+            };
+
+            var rowSplitter = new GridSplitter
+            {
+                Height = 6,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Center,
+                ResizeDirection = GridResizeDirection.Rows,
+                ResizeBehavior = GridResizeBehavior.PreviousAndNext,
+                Background = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#2E3A4F")
+            };
+
+            var chartContentGrid = new Grid();
+            chartContentGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            chartContentGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            Grid.SetRow(controlPanel, 0);
+            Grid.SetRow(klineScrollViewer, 1);
+            chartContentGrid.Children.Add(controlPanel);
+            chartContentGrid.Children.Add(klineScrollViewer);
 
             var chartBorder = new Border
             {
-                Background = Brushes.White,
-                BorderBrush = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#D9E2EC"),
+                Background = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#1B2433"),
+                BorderBrush = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#2E3A4F"),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(8),
                 Padding = new Thickness(8),
-                Child = new StackPanel
-                {
-                    Children =
-                    {
-                        controlPanel,
-                        klineCanvas
-                    }
-                }
+                Child = chartContentGrid
             };
 
             var isRealtimeMode = false;
@@ -741,6 +791,9 @@ namespace StockManager
             var realtimeTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(20) };
             var currentKLinePeriod = "3mo";
             var currentKLineInterval = "1d";
+            var historyCache = new Dictionary<string, List<KLinePoint>>(StringComparer.OrdinalIgnoreCase);
+            var historyCacheLock = new object();
+            var refreshRequestId = 0;
 
             Action updatePeriodButtonStyles = () =>
             {
@@ -754,72 +807,195 @@ namespace StockManager
                 period1YButton.Background = currentKLinePeriod == "1y" ? activeBrush : normalBrush;
             };
 
-            Action refreshKLine = () =>
+            Func<bool, System.Threading.Tasks.Task> refreshKLineAsync = async forceReload =>
             {
-                var selected = grid.SelectedItem as SectorStockDetailItem ?? sorted.FirstOrDefault();
-                if (selected == null)
+                var requestId = System.Threading.Interlocked.Increment(ref refreshRequestId);
+                var selectedForChart = sorted.Where(x => x.IsKLineVisible).ToList();
+                if (selectedForChart.Count == 0)
                 {
-                    return;
-                }
-
-                var history = new List<KLinePoint>();
-                var ok = TryLoadHistoricalDataFromYFinanceForKLine(NormalizeTwTicker(selected.Ticker), currentKLinePeriod, currentKLineInterval, history);
-                if (!ok)
-                {
-                    klineCanvas.Children.Clear();
-                    var msg = new TextBlock
+                    var selectedRow = grid.SelectedItem as SectorStockDetailItem ?? sorted.FirstOrDefault();
+                    if (selectedRow != null)
                     {
-                        Text = $"{selected.Ticker} 無法載入 K 線資料",
-                        Foreground = Brushes.Gray
-                    };
-                    Canvas.SetLeft(msg, 10);
-                    Canvas.SetTop(msg, 10);
-                    klineCanvas.Children.Add(msg);
+                        selectedForChart.Add(selectedRow);
+                    }
+                }
+
+                if (selectedForChart.Count == 0)
+                {
                     return;
                 }
 
-                DrawKLineChart(klineCanvas, history, $"{selected.Ticker} {selected.Name}");
+                realtimeStatusText.Text = "K線資料載入中...";
+
+                Action<string> renderMessage = message =>
+                {
+                    klineContainer.Children.Clear();
+                    klineContainer.Children.Add(new TextBlock
+                    {
+                        Text = message,
+                        Foreground = Brushes.Gray,
+                        Margin = new Thickness(10, 6, 0, 6)
+                    });
+                };
+
+                var selectedSnapshot = selectedForChart
+                    .Select(x => new
+                    {
+                        Item = x,
+                        Ticker = x.Ticker,
+                        Name = x.Name,
+                        NormalizedTicker = NormalizeTwTicker(x.Ticker)
+                    })
+                    .ToList();
+
+                var histories = await System.Threading.Tasks.Task.Run(() =>
+                {
+                    var result = new Dictionary<SectorStockDetailItem, List<KLinePoint>>();
+
+                    foreach (var item in selectedSnapshot)
+                    {
+                        var cacheKey = item.NormalizedTicker + "|" + currentKLinePeriod + "|" + currentKLineInterval;
+                        List<KLinePoint> history = null;
+
+                        if (!forceReload)
+                        {
+                            lock (historyCacheLock)
+                            {
+                                if (historyCache.ContainsKey(cacheKey))
+                                {
+                                    history = historyCache[cacheKey];
+                                }
+                            }
+                        }
+
+                        if (history == null)
+                        {
+                            var loaded = new List<KLinePoint>();
+                            if (!TryLoadHistoricalDataFromYFinanceForKLine(item.NormalizedTicker, currentKLinePeriod, currentKLineInterval, loaded))
+                            {
+                                continue;
+                            }
+
+                            history = loaded;
+                            lock (historyCacheLock)
+                            {
+                                historyCache[cacheKey] = history;
+                            }
+                        }
+
+                        result[item.Item] = history;
+                    }
+
+                    return result;
+                });
+
+                if (!detailWindow.IsLoaded || requestId != refreshRequestId)
+                {
+                    return;
+                }
+
+                if (selectedForChart.Count == 1)
+                {
+                    var selected = selectedForChart[0];
+                    List<KLinePoint> history;
+                    if (!histories.TryGetValue(selected, out history))
+                    {
+                        renderMessage($"{selected.Ticker} 無法載入 K 線資料");
+                        return;
+                    }
+
+                    klineContainer.Children.Clear();
+                    var singleCanvas = new Canvas
+                    {
+                        Height = 250,
+                        Background = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#1F2A3D"),
+                        ClipToBounds = true,
+                        Margin = new Thickness(0, 0, 0, 6)
+                    };
+                    klineContainer.Children.Add(singleCanvas);
+                    DrawKLineChart(singleCanvas, history, $"{selected.Ticker} {selected.Name}");
+                    realtimeStatusText.Text = isRealtimeMode
+                        ? $"即時模式中（20秒）｜K線：{selected.Ticker}"
+                        : $"K線：{selected.Ticker}";
+                    return;
+                }
+
+                if (histories.Count == 0)
+                {
+                    renderMessage("勾選股票皆無法載入 K 線資料");
+                    return;
+                }
+
+                klineContainer.Children.Clear();
+                foreach (var selected in selectedForChart)
+                {
+                    List<KLinePoint> history;
+                    if (!histories.TryGetValue(selected, out history) || history == null || history.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    var chartCanvas = new Canvas
+                    {
+                        Height = 250,
+                        Background = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#1F2A3D"),
+                        ClipToBounds = true,
+                        Margin = new Thickness(0, 0, 0, 8)
+                    };
+                    klineContainer.Children.Add(chartCanvas);
+                    DrawKLineChart(chartCanvas, history, $"{selected.Ticker} {selected.Name}");
+                }
+
+                if (klineContainer.Children.Count == 0)
+                {
+                    renderMessage("勾選股票皆無法載入 K 線資料");
+                    return;
+                }
+
+                var selectedText = string.Join("、", histories.Keys.Select(x => x.Ticker));
                 realtimeStatusText.Text = isRealtimeMode
-                    ? $"即時模式中（20秒）｜K線：{selected.Ticker}"
-                    : $"K線：{selected.Ticker}";
+                    ? $"即時模式中（20秒）｜K線分圖：{selectedText}"
+                    : $"K線分圖：{selectedText}";
             };
 
-            grid.SelectionChanged += (s, e) => refreshKLine();
+            requestRefreshKLine = () => { _ = refreshKLineAsync(false); };
+
+            grid.SelectionChanged += (s, e) => requestRefreshKLine();
 
             periodTodayButton.Click += (s, e) =>
             {
                 currentKLinePeriod = "1d";
                 currentKLineInterval = "5m";
                 updatePeriodButtonStyles();
-                refreshKLine();
+                requestRefreshKLine();
             };
             period1MButton.Click += (s, e) =>
             {
                 currentKLinePeriod = "1mo";
                 currentKLineInterval = "1d";
                 updatePeriodButtonStyles();
-                refreshKLine();
+                requestRefreshKLine();
             };
             period3MButton.Click += (s, e) =>
             {
                 currentKLinePeriod = "3mo";
                 currentKLineInterval = "1d";
                 updatePeriodButtonStyles();
-                refreshKLine();
+                requestRefreshKLine();
             };
             period6MButton.Click += (s, e) =>
             {
                 currentKLinePeriod = "6mo";
                 currentKLineInterval = "1d";
                 updatePeriodButtonStyles();
-                refreshKLine();
+                requestRefreshKLine();
             };
             period1YButton.Click += (s, e) =>
             {
                 currentKLinePeriod = "1y";
                 currentKLineInterval = "1d";
                 updatePeriodButtonStyles();
-                refreshKLine();
+                requestRefreshKLine();
             };
 
             realtimeTimer.Tick += async (s, e) =>
@@ -844,7 +1020,7 @@ namespace StockManager
                         return string.Compare(a.Ticker, b.Ticker, StringComparison.OrdinalIgnoreCase);
                     });
                     grid.Items.Refresh();
-                    refreshKLine();
+                    await refreshKLineAsync(true);
                 }
                 finally
                 {
@@ -860,7 +1036,7 @@ namespace StockManager
                     realtimeToggleButton.Content = "即時模式：開啟";
                     realtimeToggleButton.Background = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#2E7D32");
                     realtimeTimer.Start();
-                    refreshKLine();
+                    _ = refreshKLineAsync(true);
                 }
                 else
                 {
@@ -873,9 +1049,11 @@ namespace StockManager
 
             Grid.SetRow(headerPanel, 0);
             Grid.SetRow(contentBorder, 1);
-            Grid.SetRow(chartBorder, 2);
+            Grid.SetRow(rowSplitter, 2);
+            Grid.SetRow(chartBorder, 3);
             layoutRoot.Children.Add(headerPanel);
             layoutRoot.Children.Add(contentBorder);
+            layoutRoot.Children.Add(rowSplitter);
             layoutRoot.Children.Add(chartBorder);
             detailWindow.Content = layoutRoot;
 
@@ -922,9 +1100,10 @@ namespace StockManager
                     if (grid.SelectedItem == null && sorted.Count > 0)
                     {
                         grid.SelectedItem = sorted[0];
+                        sorted[0].IsKLineVisible = true;
                     }
                     updatePeriodButtonStyles();
-                    refreshKLine();
+                    requestRefreshKLine();
                 });
             };
 
@@ -1251,6 +1430,189 @@ namespace StockManager
             Canvas.SetLeft(legend, chartRight - 100);
             Canvas.SetTop(legend, 4);
             chartCanvas.Children.Add(legend);
+        }
+
+        private void DrawMultiKLineComparisonChart(Canvas chartCanvas, Dictionary<SectorStockDetailItem, List<KLinePoint>> histories)
+        {
+            chartCanvas.Children.Clear();
+            if (histories == null || histories.Count == 0)
+            {
+                return;
+            }
+
+            var width = chartCanvas.ActualWidth;
+            if (width < 320)
+            {
+                width = 820;
+            }
+
+            var height = chartCanvas.Height;
+            var chartLeft = 56.0;
+            var chartRight = width - 16.0;
+            var chartTop = 26.0;
+            var chartBottom = height - 28.0;
+
+            var recentMap = histories
+                .ToDictionary(
+                    x => x.Key,
+                    x => x.Value.Skip(Math.Max(0, x.Value.Count - 45)).ToList());
+
+            var validSeries = recentMap
+                .Where(x => x.Value.Count >= 2 && Math.Abs(x.Value.First().Close) > 0.000001)
+                .ToList();
+
+            if (validSeries.Count == 0)
+            {
+                return;
+            }
+
+            var minCount = validSeries.Min(x => x.Value.Count);
+            if (minCount < 2)
+            {
+                return;
+            }
+
+            var normalizedSeries = new List<KeyValuePair<SectorStockDetailItem, List<double>>>();
+            foreach (var series in validSeries)
+            {
+                var trimmed = series.Value.Skip(series.Value.Count - minCount).ToList();
+                var basePrice = trimmed[0].Close;
+                var normalized = trimmed
+                    .Select(p => ((p.Close - basePrice) / basePrice) * 100)
+                    .ToList();
+                normalizedSeries.Add(new KeyValuePair<SectorStockDetailItem, List<double>>(series.Key, normalized));
+            }
+
+            var allValues = normalizedSeries.SelectMany(x => x.Value).ToList();
+            var minValue = allValues.Min();
+            var maxValue = allValues.Max();
+            var range = Math.Max(0.5, maxValue - minValue);
+
+            Func<double, double> mapY = value =>
+                chartBottom - ((value - minValue) / range) * (chartBottom - chartTop);
+
+            var spacing = (chartRight - chartLeft) / Math.Max(1, minCount - 1);
+            var gridBrush = new SolidColorBrush(Color.FromRgb(230, 230, 230));
+            var axisBrush = new SolidColorBrush(Color.FromRgb(120, 120, 120));
+
+            for (int i = 0; i <= 4; i++)
+            {
+                var ratio = i / 4.0;
+                var y = chartTop + ratio * (chartBottom - chartTop);
+                var value = maxValue - ratio * range;
+
+                chartCanvas.Children.Add(new Line
+                {
+                    X1 = chartLeft,
+                    Y1 = y,
+                    X2 = chartRight,
+                    Y2 = y,
+                    Stroke = gridBrush,
+                    StrokeThickness = 1
+                });
+
+                var yText = new TextBlock
+                {
+                    Text = value.ToString("F2") + "%",
+                    FontSize = 10,
+                    Foreground = Brushes.DimGray
+                };
+                Canvas.SetLeft(yText, 4);
+                Canvas.SetTop(yText, y - 8);
+                chartCanvas.Children.Add(yText);
+            }
+
+            chartCanvas.Children.Add(new Line { X1 = chartLeft, Y1 = chartTop, X2 = chartLeft, Y2 = chartBottom, Stroke = axisBrush, StrokeThickness = 1 });
+            chartCanvas.Children.Add(new Line { X1 = chartLeft, Y1 = chartBottom, X2 = chartRight, Y2 = chartBottom, Stroke = axisBrush, StrokeThickness = 1 });
+
+            var dateSeries = validSeries[0].Value.Skip(validSeries[0].Value.Count - minCount).ToList();
+            var xTickCount = Math.Min(6, minCount);
+            if (xTickCount > 1)
+            {
+                for (int i = 0; i < xTickCount; i++)
+                {
+                    var idx = (int)Math.Round(i * (minCount - 1) / (double)(xTickCount - 1));
+                    var x = chartLeft + idx * spacing;
+
+                    chartCanvas.Children.Add(new Line
+                    {
+                        X1 = x,
+                        Y1 = chartBottom,
+                        X2 = x,
+                        Y2 = chartBottom + 4,
+                        Stroke = axisBrush,
+                        StrokeThickness = 1
+                    });
+
+                    var dateText = new TextBlock
+                    {
+                        Text = dateSeries[idx].Date.ToString("MM/dd"),
+                        FontSize = 9,
+                        Foreground = Brushes.DimGray
+                    };
+                    Canvas.SetLeft(dateText, x - 16);
+                    Canvas.SetTop(dateText, chartBottom + 4);
+                    chartCanvas.Children.Add(dateText);
+                }
+            }
+
+            var palette = new[]
+            {
+                Color.FromRgb(30, 136, 229),
+                Color.FromRgb(46, 125, 50),
+                Color.FromRgb(229, 57, 53),
+                Color.FromRgb(142, 36, 170),
+                Color.FromRgb(251, 140, 0),
+                Color.FromRgb(0, 137, 123)
+            };
+
+            for (int s = 0; s < normalizedSeries.Count; s++)
+            {
+                var color = palette[s % palette.Length];
+                var polyline = new Polyline
+                {
+                    Stroke = new SolidColorBrush(color),
+                    StrokeThickness = 1.8
+                };
+
+                for (int i = 0; i < minCount; i++)
+                {
+                    var x = chartLeft + i * spacing;
+                    var y = mapY(normalizedSeries[s].Value[i]);
+                    polyline.Points.Add(new Point(x, y));
+                }
+
+                if (polyline.Points.Count > 1)
+                {
+                    chartCanvas.Children.Add(polyline);
+                }
+            }
+
+            var titleBlock = new TextBlock
+            {
+                Text = "K線比較（基準日報酬率 %）",
+                FontSize = 12,
+                FontWeight = FontWeights.Bold,
+                Foreground = Brushes.DimGray
+            };
+            Canvas.SetLeft(titleBlock, chartLeft);
+            Canvas.SetTop(titleBlock, 0);
+            chartCanvas.Children.Add(titleBlock);
+
+            for (int i = 0; i < normalizedSeries.Count; i++)
+            {
+                var color = new SolidColorBrush(palette[i % palette.Length]);
+                var legend = new TextBlock
+                {
+                    Text = normalizedSeries[i].Key.Ticker,
+                    FontSize = 10,
+                    Foreground = color,
+                    FontWeight = FontWeights.SemiBold
+                };
+                Canvas.SetLeft(legend, chartRight - 120);
+                Canvas.SetTop(legend, 4 + i * 14);
+                chartCanvas.Children.Add(legend);
+            }
         }
 
         private List<double?> BuildMASeries(List<KLinePoint> data, int period)
@@ -2102,6 +2464,7 @@ namespace StockManager
             public double? Price { get; set; }
             public double? ChangeAmount { get; set; }
             public double? ChangePercent { get; set; }
+            public bool IsKLineVisible { get; set; }
         }
 
         private class KLinePoint

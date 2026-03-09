@@ -7,11 +7,93 @@
                 xmlns:converters="clr-namespace:StockManager.Converters"
                 mc:Ignorable="d"
                 Title="股票監控系統 - Stock Manager" Height="700" Width="1200"
-                WindowStartupLocation="CenterScreen">
+                WindowStartupLocation="CenterScreen"
+                Background="#121722">
         <Window.Resources>
                 <converters:PositiveNegativeConverter x:Key="PositiveNegativeConverter"/>
+
+                <Style TargetType="TextBox">
+                        <Setter Property="Background" Value="#1F2A3D"/>
+                        <Setter Property="Foreground" Value="#E3ECF5"/>
+                        <Setter Property="BorderBrush" Value="#3A4A63"/>
+                        <Setter Property="BorderThickness" Value="1"/>
+                        <Setter Property="Padding" Value="6,2"/>
+                </Style>
+
+                <Style TargetType="ComboBox">
+                        <Setter Property="Background" Value="#1F2A3D"/>
+                        <Setter Property="Foreground" Value="#E3ECF5"/>
+                        <Setter Property="BorderBrush" Value="#3A4A63"/>
+                        <Setter Property="BorderThickness" Value="1"/>
+                </Style>
+
+                <Style TargetType="DataGrid">
+                        <Setter Property="Background" Value="#1F2A3D"/>
+                        <Setter Property="Foreground" Value="#E3ECF5"/>
+                        <Setter Property="BorderBrush" Value="#2E3A4F"/>
+                        <Setter Property="HorizontalGridLinesBrush" Value="#32445E"/>
+                        <Setter Property="VerticalGridLinesBrush" Value="#32445E"/>
+                        <Setter Property="RowBackground" Value="#1F2A3D"/>
+                        <Setter Property="AlternatingRowBackground" Value="#24334A"/>
+                </Style>
+
+                <Style TargetType="DataGridColumnHeader">
+                        <Setter Property="Background" Value="#263247"/>
+                        <Setter Property="Foreground" Value="#BFD8F0"/>
+                        <Setter Property="BorderBrush" Value="#3A4A63"/>
+                        <Setter Property="FontWeight" Value="Bold"/>
+                </Style>
+
+                <Style x:Key="ModernTabControlStyle" TargetType="TabControl">
+                        <Setter Property="Background" Value="#1B2433"/>
+                        <Setter Property="BorderBrush" Value="#2E3A4F"/>
+                        <Setter Property="BorderThickness" Value="1"/>
+                        <Setter Property="Padding" Value="6"/>
+                </Style>
+
+                <Style x:Key="ModernTabItemStyle" TargetType="TabItem">
+                        <Setter Property="Foreground" Value="#B0BEC5"/>
+                        <Setter Property="FontSize" Value="13"/>
+                        <Setter Property="FontWeight" Value="SemiBold"/>
+                        <Setter Property="Template">
+                                <Setter.Value>
+                                        <ControlTemplate TargetType="TabItem">
+                                                <Grid>
+                                                        <Border x:Name="HeaderBorder"
+                                                                        Margin="4,4,4,0"
+                                                                        Padding="16,8"
+                                                                        Background="#263247"
+                                                                        BorderBrush="#35445C"
+                                                                        BorderThickness="1"
+                                                                        CornerRadius="10,10,0,0">
+                                                                <ContentPresenter ContentSource="Header" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                        </Border>
+                                                </Grid>
+                                                <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                                <Setter TargetName="HeaderBorder" Property="Background" Value="#32435E"/>
+                                                        </Trigger>
+                                                        <Trigger Property="IsSelected" Value="True">
+                                                                <Setter Property="Foreground" Value="#7CC7FF"/>
+                                                                <Setter Property="FontWeight" Value="Bold"/>
+                                                                <Setter TargetName="HeaderBorder" Property="Background" Value="#1C2738"/>
+                                                                <Setter TargetName="HeaderBorder" Property="BorderBrush" Value="#4FA3E0"/>
+                                                                <Setter TargetName="HeaderBorder" Property="BorderThickness" Value="1.5"/>
+                                                        </Trigger>
+                                                        <Trigger Property="IsEnabled" Value="False">
+                                                                <Setter Property="Opacity" Value="0.5"/>
+                                                        </Trigger>
+                                                </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                </Setter.Value>
+                        </Setter>
+                </Style>
         </Window.Resources>
         <Grid>
+                <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="360"/>
+                </Grid.ColumnDefinitions>
                 <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
@@ -21,7 +103,7 @@
                 </Grid.RowDefinitions>
 
                 <!-- 頂部工具列 -->
-                <Border Grid.Row="0" Background="#2C3E50" Padding="10">
+                <Border Grid.Row="0" Grid.ColumnSpan="2" Background="#2C3E50" Padding="10">
                         <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="股票監控系統" FontSize="20" FontWeight="Bold" Foreground="White" VerticalAlignment="Center" Margin="10,0"/>
                         <Button x:Name="btnAddStock" Content="+ 新增股票" Width="100" Height="30" Margin="20,0,10,0" Click="BtnAddStock_Click"
@@ -41,7 +123,9 @@
                 </Border>
 
                 <!-- 主要內容區域 - TabControl -->
-                <TabControl Grid.Row="1" x:Name="marketTabControl" Margin="5" SelectionChanged="MarketTabControl_SelectionChanged">
+                <TabControl Grid.Row="1" Grid.Column="0" Grid.RowSpan="2" x:Name="marketTabControl" Margin="5"
+                                Style="{StaticResource ModernTabControlStyle}" ItemContainerStyle="{StaticResource ModernTabItemStyle}"
+                                SelectionChanged="MarketTabControl_SelectionChanged">
                         <!-- 美股分頁 -->
                         <TabItem Header="美股市場" FontSize="14" FontWeight="Bold">
                                 <Grid>
@@ -51,7 +135,7 @@
                                         </Grid.RowDefinitions>
 
                                         <!-- 美股搜尋列 -->
-                                        <Border Grid.Row="0" Margin="10" Background="#ECF0F1" Padding="10">
+                                        <Border Grid.Row="0" Margin="10" Background="#1E2838" BorderBrush="#2E3A4F" BorderThickness="1" Padding="10">
                                                 <StackPanel Orientation="Horizontal">
                                                 <TextBlock Text="搜尋:" VerticalAlignment="Center" FontWeight="Bold" Margin="0,0,10,0"/>
                                                 <TextBox x:Name="txtUsSearch" Width="200" Height="25" VerticalContentAlignment="Center" 
@@ -60,11 +144,12 @@
                                                 </StackPanel>
                                         </Border>
 
-                                        <TabControl Grid.Row="1" Margin="10">
+                                        <TabControl Grid.Row="1" Margin="10"
+                                                        Style="{StaticResource ModernTabControlStyle}" ItemContainerStyle="{StaticResource ModernTabItemStyle}">
                                                 <TabItem Header="股價列表">
                                                         <DataGrid x:Name="dgUsStocks" AutoGenerateColumns="False"
                                                                 IsReadOnly="True" CanUserAddRows="False"
-                                                                AlternatingRowBackground="#F8F9FA" GridLinesVisibility="Horizontal"
+                                                                AlternatingRowBackground="#24334A" GridLinesVisibility="Horizontal"
                                                                 HeadersVisibility="Column" FontSize="12" SelectionMode="Single"
                                                                 MouseDoubleClick="DataGrid_MouseDoubleClick">
                                                         <DataGrid.Columns>
@@ -108,10 +193,10 @@
                                                 </TabItem>
 
                                                 <TabItem Header="庫存">
-                                                        <Border Background="#FAFAFA" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="6" Padding="10">
+                                                        <Border Background="#1B2433" BorderBrush="#2E3A4F" BorderThickness="1" CornerRadius="6" Padding="10">
                                                         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
                                                                 <StackPanel MinWidth="500">
-                                                                        <TextBlock Text="📒 我的美股庫存" FontSize="13" FontWeight="Bold" Foreground="#2C3E50" Margin="0,0,0,8"/>
+                                                                        <TextBlock Text="📒 我的美股庫存" FontSize="13" FontWeight="Bold" Foreground="#CFE3F7" Margin="0,0,0,8"/>
 
                                                                         <Grid>
                                                                                 <Grid.ColumnDefinitions>
@@ -150,7 +235,7 @@
                                                                                         </WrapPanel>
 
                                                                                         <DataGrid x:Name="dgUsHoldings" AutoGenerateColumns="False" IsReadOnly="True" Height="240"
-                                                                                                        CanUserAddRows="False" AlternatingRowBackground="#F8F9FA" GridLinesVisibility="Horizontal"
+                                                                                                        CanUserAddRows="False" AlternatingRowBackground="#24334A" GridLinesVisibility="Horizontal"
                                                                                                         HeadersVisibility="Column" FontSize="12" SelectionMode="Single"
                                                                                                         SelectionChanged="DgUsHoldings_SelectionChanged">
                                                                                                 <DataGrid.Columns>
@@ -166,11 +251,11 @@
                                                                                         </DataGrid>
                                                                                 </StackPanel>
 
-                                                                                <Border Grid.Column="1" Background="#F3F5F7" BorderBrush="#DADFE6" BorderThickness="1" CornerRadius="6" Padding="10">
+                                                                                <Border Grid.Column="1" Background="#222E42" BorderBrush="#33445D" BorderThickness="1" CornerRadius="6" Padding="10">
                                                                                         <StackPanel>
-                                                                                                <TextBlock Text="損益總覽" FontWeight="Bold" Foreground="#2C3E50" Margin="0,0,0,8"/>
-                                                                                                <TextBlock x:Name="txtUsTotalPnL" Text="美股未實現：0.00 (0.00%)" FontWeight="Bold" Foreground="#2C3E50" Margin="0,8,0,0" TextWrapping="Wrap"/>
-                                                                                                <TextBlock x:Name="txtUsRealizedPnL" Text="美股已實現：0.00" FontWeight="Bold" Foreground="#2C3E50" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                                                                                                <TextBlock Text="損益總覽" FontWeight="Bold" Foreground="#CFE3F7" Margin="0,0,0,8"/>
+                                                                                                <TextBlock x:Name="txtUsTotalPnL" Text="美股未實現：0.00 (0.00%)" FontWeight="Bold" Foreground="#CFE3F7" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                                                                                                <TextBlock x:Name="txtUsRealizedPnL" Text="美股已實現：0.00" FontWeight="Bold" Foreground="#CFE3F7" Margin="0,8,0,0" TextWrapping="Wrap"/>
                                                                                         </StackPanel>
                                                                                 </Border>
                                                                         </Grid>
@@ -191,14 +276,11 @@
                                         </Grid.RowDefinitions>
 
                                         <!-- 台股搜尋列 -->
-                                        <Border Grid.Row="0" Margin="10" Background="#ECF0F1" Padding="10">
+                                        <Border Grid.Row="0" Margin="10" Background="#1E2838" BorderBrush="#2E3A4F" BorderThickness="1" Padding="10">
                                                 <StackPanel Orientation="Horizontal">
                                                 <TextBlock Text="搜尋:" VerticalAlignment="Center" FontWeight="Bold" Margin="0,0,10,0"/>
                                                 <TextBox x:Name="txtTwSearch" Width="200" Height="25" VerticalContentAlignment="Center"
                                                                 TextChanged="TxtSearch_TextChanged" Tag="TW"/>
-                                                <Button x:Name="btnTwFilter" Content="台股篩選" Width="90" Height="25" Margin="10,0,0,0"
-                                                                Click="BtnTwFilter_Click" Background="#607D8B" Foreground="White"
-                                                                FontWeight="Bold" BorderThickness="0" Cursor="Hand"/>
                                                 <Button x:Name="btnTwYFinanceCacheUpdate" Content="更新族群快取" Width="100" Height="25" Margin="8,0,0,0"
                                                                 Click="BtnTwYFinanceCacheUpdate_Click" Background="#455A64" Foreground="White"
                                                                 FontWeight="Bold" BorderThickness="0" Cursor="Hand"/>
@@ -215,11 +297,12 @@
                                                 </StackPanel>
                                         </Border>
 
-                                        <TabControl Grid.Row="1" Margin="10">
+                                        <TabControl Grid.Row="1" Margin="10" TabStripPlacement="Left"
+                                                        Style="{StaticResource ModernTabControlStyle}" ItemContainerStyle="{StaticResource ModernTabItemStyle}">
                                                 <TabItem Header="股價列表">
                                                         <DataGrid x:Name="dgTwStocks" AutoGenerateColumns="False"
                                                                 IsReadOnly="True" CanUserAddRows="False"
-                                                                AlternatingRowBackground="#F8F9FA" GridLinesVisibility="Horizontal"
+                                                                AlternatingRowBackground="#24334A" GridLinesVisibility="Horizontal"
                                                                 HeadersVisibility="Column" FontSize="12" SelectionMode="Single"
                                                                 MouseDoubleClick="DataGrid_MouseDoubleClick">
                                                         <DataGrid.Columns>
@@ -262,11 +345,15 @@
                                                         </DataGrid>
                                                 </TabItem>
 
+                                                <TabItem Header="台股篩選">
+                                                        <local:TwStockFilterWindow/>
+                                                </TabItem>
+
                                                 <TabItem Header="庫存">
-                                                        <Border Background="#FAFAFA" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="6" Padding="10">
+                                                        <Border Background="#1B2433" BorderBrush="#2E3A4F" BorderThickness="1" CornerRadius="6" Padding="10">
                                                         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
                                                                 <StackPanel MinWidth="500">
-                                                                        <TextBlock Text="📒 我的台股庫存" FontSize="13" FontWeight="Bold" Foreground="#2C3E50" Margin="0,0,0,8"/>
+                                                                        <TextBlock Text="📒 我的台股庫存" FontSize="13" FontWeight="Bold" Foreground="#CFE3F7" Margin="0,0,0,8"/>
 
                                                                         <Grid>
                                                                                 <Grid.ColumnDefinitions>
@@ -305,7 +392,7 @@
                                                                                         </WrapPanel>
 
                                                                                         <DataGrid x:Name="dgTwHoldings" AutoGenerateColumns="False" IsReadOnly="True" Height="240"
-                                                                                                        CanUserAddRows="False" AlternatingRowBackground="#F8F9FA" GridLinesVisibility="Horizontal"
+                                                                                                        CanUserAddRows="False" AlternatingRowBackground="#24334A" GridLinesVisibility="Horizontal"
                                                                                                         HeadersVisibility="Column" FontSize="12" SelectionMode="Single"
                                                                                                         SelectionChanged="DgTwHoldings_SelectionChanged">
                                                                                                 <DataGrid.Columns>
@@ -321,11 +408,11 @@
                                                                                         </DataGrid>
                                                                                 </StackPanel>
 
-                                                                                <Border Grid.Column="1" Background="#F3F5F7" BorderBrush="#DADFE6" BorderThickness="1" CornerRadius="6" Padding="10">
+                                                                                <Border Grid.Column="1" Background="#222E42" BorderBrush="#33445D" BorderThickness="1" CornerRadius="6" Padding="10">
                                                                                         <StackPanel>
-                                                                                                <TextBlock Text="損益總覽" FontWeight="Bold" Foreground="#2C3E50" Margin="0,0,0,8"/>
-                                                                                                <TextBlock x:Name="txtTwTotalPnL" Text="台股未實現：0.00 (0.00%)" FontWeight="Bold" Foreground="#2C3E50" Margin="0,8,0,0" TextWrapping="Wrap"/>
-                                                                                                <TextBlock x:Name="txtTwRealizedPnL" Text="台股已實現：0.00" FontWeight="Bold" Foreground="#2C3E50" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                                                                                                <TextBlock Text="損益總覽" FontWeight="Bold" Foreground="#CFE3F7" Margin="0,0,0,8"/>
+                                                                                                <TextBlock x:Name="txtTwTotalPnL" Text="台股未實現：0.00 (0.00%)" FontWeight="Bold" Foreground="#CFE3F7" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                                                                                                <TextBlock x:Name="txtTwRealizedPnL" Text="台股已實現：0.00" FontWeight="Bold" Foreground="#CFE3F7" Margin="0,8,0,0" TextWrapping="Wrap"/>
                                                                                         </StackPanel>
                                                                                 </Border>
                                                                         </Grid>
@@ -339,33 +426,44 @@
                 </TabControl>
 
                 <!-- 最新新聞 -->
-                <Border Grid.Row="2" Margin="8,0,8,6" Background="#FAFAFA" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="6" Padding="8">
-                        <StackPanel>
-                                <DockPanel Margin="0,0,0,6">
-                                        <TextBlock Text="📰 最新新聞" FontSize="13" FontWeight="Bold" Foreground="#2C3E50"/>
+                <Border Grid.Row="1" Grid.Column="1" Grid.RowSpan="2" Margin="0,5,8,6" Background="#1B2433" BorderBrush="#2E3A4F" BorderThickness="1" CornerRadius="6" Padding="8">
+                        <Grid>
+                                <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                </Grid.RowDefinitions>
+
+                                <DockPanel Grid.Row="0" Margin="0,0,0,6">
+                                        <TextBlock Text="📰 最新新聞焦點" FontSize="16" FontWeight="ExtraBold" Foreground="#7CC7FF"/>
                                         <TextBlock x:Name="txtMaxImpactStock" DockPanel.Dock="Right" Foreground="#C62828" FontWeight="Bold"/>
                                 </DockPanel>
 
-                                <DataGrid x:Name="dgNewsImpact" AutoGenerateColumns="False" IsReadOnly="True" Height="130"
-                                                  CanUserAddRows="False" HeadersVisibility="Column" FontSize="11"
-                                                  AlternatingRowBackground="#F8F9FA">
+                                <DataGrid Grid.Row="1" x:Name="dgNewsImpact" AutoGenerateColumns="False" IsReadOnly="True"
+                                                  CanUserAddRows="False" HeadersVisibility="Column" FontSize="12" MinRowHeight="34"
+                                                  ScrollViewer.HorizontalScrollBarVisibility="Auto"  ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                                  Background="#1F2A3D" Foreground="#E3ECF5" AlternatingRowBackground="#24334A">
                                         <DataGrid.Columns>
-                                                <DataGridTextColumn Header="時間" Binding="{Binding Time}" Width="110"/>
-                                                <DataGridTextColumn Header="最新新聞標題" Binding="{Binding Headline}" Width="*"/>
-                                                <DataGridTextColumn Header="來源" Binding="{Binding Source}" Width="120"/>
-                                                <DataGridTextColumn Header="重要性分數" Binding="{Binding ImportanceScore}" Width="90"/>
-                                                <DataGridTextColumn Header="影響程度" Binding="{Binding ImportanceLevel}" Width="80"/>
+                                                <DataGridTextColumn Header="時間" Binding="{Binding Time}" Width="70"/>
+                                                <DataGridTemplateColumn Header="最新新聞標題" Width="*">
+                                                        <DataGridTemplateColumn.CellTemplate>
+                                                                <DataTemplate>
+                                                                        <TextBlock Text="{Binding Headline}" TextWrapping="Wrap" FontWeight="Bold" LineHeight="18"/>
+                                                                </DataTemplate>
+                                                        </DataGridTemplateColumn.CellTemplate>
+                                                </DataGridTemplateColumn>
+                                                <DataGridTextColumn Header="來源" Binding="{Binding Source}" Width="90"/>
+                                                <DataGridTextColumn Header="影響" Binding="{Binding ImportanceLevel}" Width="50"/>
                                         </DataGrid.Columns>
                                 </DataGrid>
-                        </StackPanel>
+                        </Grid>
                 </Border>
 
                 <!-- 進度條 -->
-                <ProgressBar Grid.Row="3" x:Name="progressBar" Height="8" Minimum="0" Maximum="100" 
+                <ProgressBar Grid.Row="3" Grid.ColumnSpan="2" x:Name="progressBar" Height="8" Minimum="0" Maximum="100" 
                                         Foreground="#3498DB" BorderThickness="0"/>
 
                 <!-- 底部狀態列 -->
-                <StatusBar Grid.Row="4" Background="#34495E" Height="30">
+                <StatusBar Grid.Row="4" Grid.ColumnSpan="2" Background="#34495E" Height="30">
                         <StatusBarItem>
                                 <TextBlock x:Name="statusText" Text="準備就緒" Foreground="White" FontSize="12"/>
                         </StatusBarItem>

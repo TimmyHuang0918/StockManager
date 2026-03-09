@@ -2766,9 +2766,9 @@ namespace StockManager
                         technicalTab.Visibility = Visibility.Collapsed;
                         analysisTab.Visibility = Visibility.Collapsed;
 
-                        btnTabChart.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#E3F2FD"));
-                        btnTabTechnical.Background = new SolidColorBrush(Colors.White);
-                        btnTabAnalysis.Background = new SolidColorBrush(Colors.White);
+                        btnTabChart.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#2A3A52"));
+                        btnTabTechnical.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1F2A3D"));
+                        btnTabAnalysis.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1F2A3D"));
                 }
 
                 private void BtnTabTechnical_Click(object sender, RoutedEventArgs e)
@@ -2777,9 +2777,9 @@ namespace StockManager
                         technicalTab.Visibility = Visibility.Visible;
                         analysisTab.Visibility = Visibility.Collapsed;
 
-                        btnTabChart.Background = new SolidColorBrush(Colors.White);
-                        btnTabTechnical.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#E3F2FD"));
-                        btnTabAnalysis.Background = new SolidColorBrush(Colors.White);
+                        btnTabChart.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1F2A3D"));
+                        btnTabTechnical.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#2A3A52"));
+                        btnTabAnalysis.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1F2A3D"));
                 }
 
                 private void BtnTabAnalysis_Click(object sender, RoutedEventArgs e)
@@ -2788,9 +2788,9 @@ namespace StockManager
                         technicalTab.Visibility = Visibility.Collapsed;
                         analysisTab.Visibility = Visibility.Visible;
 
-                        btnTabChart.Background = new SolidColorBrush(Colors.White);
-                        btnTabTechnical.Background = new SolidColorBrush(Colors.White);
-                        btnTabAnalysis.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#E3F2FD"));
+                        btnTabChart.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1F2A3D"));
+                        btnTabTechnical.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1F2A3D"));
+                        btnTabAnalysis.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#2A3A52"));
                 }
 
                 private async void BtnRefresh_Click(object sender, RoutedEventArgs e)

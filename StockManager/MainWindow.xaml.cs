@@ -1191,9 +1191,7 @@ namespace StockManager
 
                 private void BtnTwFilter_Click(object sender, RoutedEventArgs e)
                 {
-                        var filterWindow = new TwStockFilterWindow();
-                        filterWindow.Owner = this;
-                        filterWindow.Show();
+                        marketTabControl.SelectedIndex = 1;
                 }
 
                 private async void BtnTwYFinanceCacheUpdate_Click(object sender, RoutedEventArgs e)
