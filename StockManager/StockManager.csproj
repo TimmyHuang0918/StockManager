@@ -57,6 +57,7 @@
       <SubType>Designer</SubType>
     </ApplicationDefinition>
     <Compile Include="AddStockDialog.xaml.cs" />
+    <Compile Include="CashInputDialog.xaml.cs" />
     <Compile Include="Config\AppConfig.cs" />
     <Compile Include="Config\TaiwanSectorConfigData.cs" />
     <Compile Include="Converters\PositiveNegativeConverter.cs" />
@@ -76,6 +77,9 @@
       <DependentUpon>UserNameInputDialog.xaml</DependentUpon>
     </Compile>
     <Page Include="AddStockDialog.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="CashInputDialog.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
     <Page Include="DebugWindow.xaml">

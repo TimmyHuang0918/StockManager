@@ -40,7 +40,7 @@
 
                     <StackPanel Margin="0,14,0,8">
                         <Button x:Name="btnApplyFilter" Content="套用篩選" Width="92" Height="30"
-                                Click="BtnApplyFilter_Click" Background="#1976D2" Foreground="White" FontWeight="Bold" BorderThickness="0"/>
+                                Click="BtnApplyFilter_Click" Background="#1976D2" Foreground="White" FontWeight="Bold" BorderThickness="0" />
                     </StackPanel>
 
                     <StackPanel Margin="10,14,0,8">

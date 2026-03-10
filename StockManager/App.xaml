@@ -9,7 +9,7 @@
                         <Setter Property="Template">
                                 <Setter.Value>
                                         <ControlTemplate TargetType="Thumb">
-                                                <Border Background="#7FAEC8" CornerRadius="4"/>
+                                                <Border Background="#4B5563" CornerRadius="4"/>
                                         </ControlTemplate>
                                 </Setter.Value>
                         </Setter>
@@ -60,7 +60,7 @@
                 </ControlTemplate>
 
                 <Style TargetType="ScrollBar">
-                        <Setter Property="Opacity" Value="0"/>
+                        <Setter Property="Opacity" Value="1"/>
                         <Setter Property="Background" Value="Transparent"/>
                         <Setter Property="Width" Value="8"/>
                         <Setter Property="Height" Value="8"/>
@@ -72,12 +72,6 @@
                                 <Trigger Property="Orientation" Value="Horizontal">
                                         <Setter Property="Height" Value="8"/>
                                         <Setter Property="Template" Value="{StaticResource HorizontalSlimScrollBarTemplate}"/>
-                                </Trigger>
-                                <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter Property="Opacity" Value="1"/>
-                                </Trigger>
-                                <Trigger Property="IsMouseCaptureWithin" Value="True">
-                                        <Setter Property="Opacity" Value="1"/>
                                 </Trigger>
                         </Style.Triggers>
                 </Style>

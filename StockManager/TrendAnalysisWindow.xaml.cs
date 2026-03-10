@@ -2493,6 +2493,10 @@ namespace StockManager
 
                 private void GenerateAIAnalysis(List<CandlestickData> data, double currentPrice, double? changePercent)
                 {
+                        var suggestionBorderElement = FindName("suggestionBorder") as Border;
+                        var suggestionTextBlock = FindName("txtSuggestion") as TextBlock;
+                        var riskWarningTextBlock = FindName("txtRiskWarning") as TextBlock;
+
                         if (data == null || data.Count < 2)
                         {
                                 txtCurrentRecommendation.Text = "資料不足，無法產生交易建議";
@@ -2634,12 +2638,18 @@ namespace StockManager
                                 }
 
                                 txtSuggestionTitle.Text = "💰 強烈買入建議";
-                                suggestionBorder.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#E8F5E9"));
-                                suggestionBorder.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#4CAF50"));
-                                txtSuggestion.Text = $"根據技術分析，該股票綜合評分達到 {score} 分（滿分100），處於強勢區間。\n\n" +
-                                        $"建議理由：\n" +
-                                        string.Join("\n", reasons.Select(r => $"• {r}")) +
-                                        $"\n\n💡 操作建議：可考慮分批買入，設定止損點在 ${currentPrice * 0.95:F2}";
+                                if (suggestionBorderElement != null)
+                                {
+                                        suggestionBorderElement.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#E8F5E9"));
+                                        suggestionBorderElement.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#4CAF50"));
+                                }
+                                if (suggestionTextBlock != null)
+                                {
+                                        suggestionTextBlock.Text = $"根據技術分析，該股票綜合評分達到 {score} 分（滿分100），處於強勢區間。\n\n" +
+                                                $"建議理由：\n" +
+                                                string.Join("\n", reasons.Select(r => $"• {r}")) +
+                                                $"\n\n💡 操作建議：可考慮分批買入，設定止損點在 ${currentPrice * 0.95:F2}";
+                                }
                         }
                         else if (score >= 50)
                         {
@@ -2654,12 +2664,18 @@ namespace StockManager
                                 }
 
                                 txtSuggestionTitle.Text = "📊 持有觀望";
-                                suggestionBorder.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFF3E0"));
-                                suggestionBorder.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FF9800"));
-                                txtSuggestion.Text = $"根據技術分析，該股票綜合評分為 {score} 分，處於中性區間。\n\n" +
-                                        $"市場狀況：\n" +
-                                        string.Join("\n", reasons.Select(r => $"• {r}")) +
-                                        $"\n\n💡 操作建議：已持有者建議持有觀望，未持有者等待更明確信號。";
+                                if (suggestionBorderElement != null)
+                                {
+                                        suggestionBorderElement.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFF3E0"));
+                                        suggestionBorderElement.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FF9800"));
+                                }
+                                if (suggestionTextBlock != null)
+                                {
+                                        suggestionTextBlock.Text = $"根據技術分析，該股票綜合評分為 {score} 分，處於中性區間。\n\n" +
+                                                $"市場狀況：\n" +
+                                                string.Join("\n", reasons.Select(r => $"• {r}")) +
+                                                $"\n\n💡 操作建議：已持有者建議持有觀望，未持有者等待更明確信號。";
+                                }
                         }
                         else
                         {
@@ -2674,21 +2690,30 @@ namespace StockManager
                                 }
 
                                 txtSuggestionTitle.Text = "⚠️ 建議賣出";
-                                suggestionBorder.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFEBEE"));
-                                suggestionBorder.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#F44336"));
-                                txtSuggestion.Text = $"根據技術分析，該股票綜合評分僅 {score} 分，處於弱勢區間。\n\n" +
-                                        $"風險因素：\n" +
-                                        string.Join("\n", reasons.Select(r => $"• {r}")) +
-                                        $"\n\n💡 操作建議：建議減倉或清倉，等待更好的進場時機。";
+                                if (suggestionBorderElement != null)
+                                {
+                                        suggestionBorderElement.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFEBEE"));
+                                        suggestionBorderElement.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#F44336"));
+                                }
+                                if (suggestionTextBlock != null)
+                                {
+                                        suggestionTextBlock.Text = $"根據技術分析，該股票綜合評分僅 {score} 分，處於弱勢區間。\n\n" +
+                                                $"風險因素：\n" +
+                                                string.Join("\n", reasons.Select(r => $"• {r}")) +
+                                                $"\n\n💡 操作建議：建議減倉或清倉，等待更好的進場時機。";
+                                }
                         }
 
                         // 風險提示
-                        txtRiskWarning.Text = "本分析僅供參考，不構成投資建議。股市有風險，投資需謹慎。\n\n" +
-                                "⚠️ 重要提醒：\n" +
-                                "• 優先使用 yfinance 歷史資料，若資料抓取失敗會回退到模擬資料\n" +
-                                "• 請以實際市場數據和專業投資顧問建議為準\n" +
-                                "• 投資前請充分評估自身風險承受能力\n" +
-                                "• 建議設定止損點，控制投資風險";
+                        if (riskWarningTextBlock != null)
+                        {
+                                riskWarningTextBlock.Text = "本分析僅供參考，不構成投資建議。股市有風險，投資需謹慎。\n\n" +
+                                        "⚠️ 重要提醒：\n" +
+                                        "• 優先使用 yfinance 歷史資料，若資料抓取失敗會回退到模擬資料\n" +
+                                        "• 請以實際市場數據和專業投資顧問建議為準\n" +
+                                        "• 投資前請充分評估自身風險承受能力\n" +
+                                        "• 建議設定止損點，控制投資風險";
+                        }
                 }
 
                 private string GetPeriodDisplay(string period)
@@ -2742,7 +2767,8 @@ namespace StockManager
                                         return;
                                 }
 
-                                if (cboPeriod?.SelectedItem is ComboBoxItem item)
+                                var periodCombo = FindName("cboPeriod") as ComboBox;
+                                if (periodCombo?.SelectedItem is ComboBoxItem item)
                                 {
                                         var newPeriod = item.Tag?.ToString();
                                         if (!string.IsNullOrEmpty(newPeriod) && newPeriod != _currentPeriod)
@@ -2762,35 +2788,56 @@ namespace StockManager
 
                 private void BtnTabChart_Click(object sender, RoutedEventArgs e)
                 {
-                        chartTab.Visibility = Visibility.Visible;
-                        technicalTab.Visibility = Visibility.Collapsed;
-                        analysisTab.Visibility = Visibility.Collapsed;
+                        var tabChart = FindName("chartTab") as FrameworkElement;
+                        var tabTechnical = FindName("technicalTab") as FrameworkElement;
+                        var tabAnalysis = FindName("analysisTab") as FrameworkElement;
+                        var tabButtonChart = FindName("btnTabChart") as Button;
+                        var tabButtonTechnical = FindName("btnTabTechnical") as Button;
+                        var tabButtonAnalysis = FindName("btnTabAnalysis") as Button;
 
-                        btnTabChart.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#2A3A52"));
-                        btnTabTechnical.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1F2A3D"));
-                        btnTabAnalysis.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1F2A3D"));
+                        if (tabChart != null) tabChart.Visibility = Visibility.Visible;
+                        if (tabTechnical != null) tabTechnical.Visibility = Visibility.Collapsed;
+                        if (tabAnalysis != null) tabAnalysis.Visibility = Visibility.Collapsed;
+
+                        if (tabButtonChart != null) tabButtonChart.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#2A3A52"));
+                        if (tabButtonTechnical != null) tabButtonTechnical.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1F2A3D"));
+                        if (tabButtonAnalysis != null) tabButtonAnalysis.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1F2A3D"));
                 }
 
                 private void BtnTabTechnical_Click(object sender, RoutedEventArgs e)
                 {
-                        chartTab.Visibility = Visibility.Collapsed;
-                        technicalTab.Visibility = Visibility.Visible;
-                        analysisTab.Visibility = Visibility.Collapsed;
+                        var tabChart = FindName("chartTab") as FrameworkElement;
+                        var tabTechnical = FindName("technicalTab") as FrameworkElement;
+                        var tabAnalysis = FindName("analysisTab") as FrameworkElement;
+                        var tabButtonChart = FindName("btnTabChart") as Button;
+                        var tabButtonTechnical = FindName("btnTabTechnical") as Button;
+                        var tabButtonAnalysis = FindName("btnTabAnalysis") as Button;
 
-                        btnTabChart.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1F2A3D"));
-                        btnTabTechnical.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#2A3A52"));
-                        btnTabAnalysis.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1F2A3D"));
+                        if (tabChart != null) tabChart.Visibility = Visibility.Collapsed;
+                        if (tabTechnical != null) tabTechnical.Visibility = Visibility.Visible;
+                        if (tabAnalysis != null) tabAnalysis.Visibility = Visibility.Collapsed;
+
+                        if (tabButtonChart != null) tabButtonChart.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1F2A3D"));
+                        if (tabButtonTechnical != null) tabButtonTechnical.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#2A3A52"));
+                        if (tabButtonAnalysis != null) tabButtonAnalysis.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1F2A3D"));
                 }
 
                 private void BtnTabAnalysis_Click(object sender, RoutedEventArgs e)
                 {
-                        chartTab.Visibility = Visibility.Collapsed;
-                        technicalTab.Visibility = Visibility.Collapsed;
-                        analysisTab.Visibility = Visibility.Visible;
+                        var tabChart = FindName("chartTab") as FrameworkElement;
+                        var tabTechnical = FindName("technicalTab") as FrameworkElement;
+                        var tabAnalysis = FindName("analysisTab") as FrameworkElement;
+                        var tabButtonChart = FindName("btnTabChart") as Button;
+                        var tabButtonTechnical = FindName("btnTabTechnical") as Button;
+                        var tabButtonAnalysis = FindName("btnTabAnalysis") as Button;
 
-                        btnTabChart.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1F2A3D"));
-                        btnTabTechnical.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1F2A3D"));
-                        btnTabAnalysis.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#2A3A52"));
+                        if (tabChart != null) tabChart.Visibility = Visibility.Collapsed;
+                        if (tabTechnical != null) tabTechnical.Visibility = Visibility.Collapsed;
+                        if (tabAnalysis != null) tabAnalysis.Visibility = Visibility.Visible;
+
+                        if (tabButtonChart != null) tabButtonChart.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1F2A3D"));
+                        if (tabButtonTechnical != null) tabButtonTechnical.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1F2A3D"));
+                        if (tabButtonAnalysis != null) tabButtonAnalysis.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#2A3A52"));
                 }
 
                 private async void BtnRefresh_Click(object sender, RoutedEventArgs e)
@@ -2820,6 +2867,7 @@ namespace StockManager
                         WindowStyle = WindowStyle.ToolWindow;
                         ShowInTaskbar = false;
                         Topmost = true;
+                        Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#121722"));
 
                         var panel = new StackPanel
                         {
@@ -2831,7 +2879,7 @@ namespace StockManager
                                 Text = "準備中...",
                                 FontSize = 13,
                                 Margin = new Thickness(0, 0, 0, 10),
-                                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#2F3B45"))
+                                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#D8E6F3"))
                         };
 
                         _progressBar = new ProgressBar
@@ -2839,12 +2887,24 @@ namespace StockManager
                                 Minimum = 0,
                                 Maximum = 100,
                                 Height = 16,
-                                Value = 0
+                                Value = 0,
+                                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#4FC3F7")),
+                                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#2E3A4F")),
+                                BorderThickness = new Thickness(0)
                         };
 
                         panel.Children.Add(_statusText);
                         panel.Children.Add(_progressBar);
-                        Content = panel;
+                        Content = new Border
+                        {
+                                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1B2433")),
+                                BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#2E3A4F")),
+                                BorderThickness = new Thickness(1),
+                                CornerRadius = new CornerRadius(8),
+                                Padding = new Thickness(2),
+                                Margin = new Thickness(8),
+                                Child = panel
+                        };
                 }
 
                 public void UpdateProgress(double progress, string message)

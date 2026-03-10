@@ -50,6 +50,8 @@ namespace StockManager
                 private string _currentHoldingUser = "default";
                 private double _usRealizedPnL = 0;
                 private double _twRealizedPnL = 0;
+                private double _usCashBalance = 0;
+                private double _twCashBalance = 0;
                 private DateTime _lastNewsUpdate = DateTime.MinValue;
                 private bool _isNewsUpdating = false;
                 private Dictionary<string, string> _translationCache = new Dictionary<string, string>();
@@ -68,12 +70,65 @@ namespace StockManager
                 public MainWindow()
                 {
                         InitializeComponent();
+                        StateChanged += MainWindow_StateChanged;
                         InitializeServices();
                         InitializeUI();
                         StartMonitoring();
 
                         // 重定向 Console 輸出到調試視窗
                         Console.SetOut(new DebugTextWriter(this));
+                }
+
+                private void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+                {
+                        if (e.ClickCount == 2)
+                        {
+                                ToggleWindowState();
+                                return;
+                        }
+
+                        if (e.LeftButton == MouseButtonState.Pressed)
+                        {
+                                DragMove();
+                        }
+                }
+
+                private void BtnWindowMinimize_Click(object sender, RoutedEventArgs e)
+                {
+                        WindowState = WindowState.Minimized;
+                }
+
+                private void BtnWindowMaxRestore_Click(object sender, RoutedEventArgs e)
+                {
+                        ToggleWindowState();
+                }
+
+                private void BtnWindowClose_Click(object sender, RoutedEventArgs e)
+                {
+                        Close();
+                }
+
+                private void MainWindow_StateChanged(object sender, EventArgs e)
+                {
+                        var maxRestoreButton = FindName("btnWindowMaxRestore") as Button;
+                        if (maxRestoreButton == null)
+                        {
+                                return;
+                        }
+
+                        maxRestoreButton.Content = WindowState == WindowState.Maximized ? "❐" : "□";
+                }
+
+                private void ToggleWindowState()
+                {
+                        if (ResizeMode == ResizeMode.NoResize)
+                        {
+                                return;
+                        }
+
+                        WindowState = WindowState == WindowState.Maximized
+                                ? WindowState.Normal
+                                : WindowState.Maximized;
                 }
 
                 private void CboHoldingUser_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -263,6 +318,16 @@ namespace StockManager
                         dgTwHoldings.ItemsSource = _twHoldingList;
                         dgNewsImpact.ItemsSource = _newsImpactList;
 
+                        if (btnUsSetCash != null)
+                        {
+                                btnUsSetCash.Click += BtnUsSetCash_Click;
+                        }
+
+                        if (btnTwSetCash != null)
+                        {
+                                btnTwSetCash.Click += BtnTwSetCash_Click;
+                        }
+
                         InitializeHoldingUsers();
 
                         // 載入股票數據
@@ -306,6 +371,8 @@ namespace StockManager
                 {
                         _usRealizedPnL = ReadRealizedPnL(GetRealizedFile("US"));
                         _twRealizedPnL = ReadRealizedPnL(GetRealizedFile("TW"));
+                        _usCashBalance = ReadCashBalance(GetCashFile("US"));
+                        _twCashBalance = ReadCashBalance(GetCashFile("TW"));
 
                         _usHoldingList.Clear();
                         foreach (var h in ReadHoldingsFromFile(GetHoldingFile("US")))
@@ -358,6 +425,44 @@ namespace StockManager
                         catch (Exception ex)
                         {
                                 Console.WriteLine($"[已實現損益儲存失敗] {market}: {ex.Message}");
+                        }
+                }
+
+                private double ReadCashBalance(string filePath)
+                {
+                        try
+                        {
+                                if (!File.Exists(filePath)) return 0;
+                                var text = File.ReadAllText(filePath).Trim();
+                                if (double.TryParse(text, out double value)) return value;
+                        }
+                        catch { }
+
+                        return 0;
+                }
+
+                private void SaveCashBalance(string market)
+                {
+                        try
+                        {
+                                if (!Directory.Exists(AppConfig.UserConfigDir))
+                                {
+                                        Directory.CreateDirectory(AppConfig.UserConfigDir);
+                                }
+
+                                var filePath = GetCashFile(market);
+                                var dir = System.IO.Path.GetDirectoryName(filePath);
+                                if (!string.IsNullOrWhiteSpace(dir) && !Directory.Exists(dir))
+                                {
+                                        Directory.CreateDirectory(dir);
+                                }
+
+                                var value = market == "US" ? _usCashBalance : _twCashBalance;
+                                File.WriteAllText(filePath, value.ToString("F4"), Encoding.UTF8);
+                        }
+                        catch (Exception ex)
+                        {
+                                Console.WriteLine($"[現金餘額儲存失敗] {market}: {ex.Message}");
                         }
                 }
 
@@ -449,6 +554,12 @@ namespace StockManager
                 private string GetRealizedFile(string market)
                 {
                         var fileName = market == "US" ? "us_realized_pnl.txt" : "tw_realized_pnl.txt";
+                        return System.IO.Path.Combine(GetUserStorageDir(), fileName);
+                }
+
+                private string GetCashFile(string market)
+                {
+                        var fileName = market == "US" ? "us_cash_balance.txt" : "tw_cash_balance.txt";
                         return System.IO.Path.Combine(GetUserStorageDir(), fileName);
                 }
 
@@ -870,20 +981,30 @@ namespace StockManager
                 {
                         var holdings = market == "US" ? _usHoldingList : _twHoldingList;
                         var totalCost = holdings.Sum(x => x.CostAmount);
+                        var totalStockValue = holdings.Sum(x => x.MarketValue);
                         var totalPnl = holdings.Sum(x => x.UnrealizedPnL);
                         var totalPnlPct = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
                         var realized = market == "US" ? _usRealizedPnL : _twRealizedPnL;
+                        var cash = market == "US" ? _usCashBalance : _twCashBalance;
+                        var totalAsset = cash + totalStockValue;
 
                         var text = market == "US"
-                                ? $"美股未實現：{totalPnl:N2} ({totalPnlPct:F2}%)"
-                                : $"台股未實現：{totalPnl:N2} ({totalPnlPct:F2}%)";
+                                ? $"美股未實現：{totalPnl:N0} ({totalPnlPct:F2}%)"
+                                : $"台股未實現：{totalPnl:N0} ({totalPnlPct:F2}%)";
 
                         var realizedText = market == "US"
-                                ? $"美股已實現：{realized:N2}"
-                                : $"台股已實現：{realized:N2}";
+                                ? $"美股已實現：{realized:N0}"
+                                : $"台股已實現：{realized:N0}";
 
                         if (market == "US")
                         {
+                                txtUsCashBalance.Text = $"美股現金：{cash:N0}";
+                                txtUsStockValue.Text = $"美股股票總額：{totalStockValue:N0}";
+                                var usTotalAssetText = FindName("txtUsAssetTotalView") as TextBlock ?? FindName("txtUsTotalAsset") as TextBlock;
+                                if (usTotalAssetText != null)
+                                {
+                                        usTotalAssetText.Text = $"美股總資產：{totalAsset:N0}";
+                                }
                                 txtUsTotalPnL.Text = text;
                                 txtUsTotalPnL.Foreground = totalPnl >= 0 ? new SolidColorBrush(Color.FromRgb(39, 174, 96)) : new SolidColorBrush(Color.FromRgb(231, 76, 60));
                                 txtUsRealizedPnL.Text = realizedText;
@@ -891,6 +1012,9 @@ namespace StockManager
                         }
                         else
                         {
+                                txtTwCashBalance.Text = $"台股現金：{cash:N0}";
+                                txtTwStockValue.Text = $"台股股票總額：{totalStockValue:N0}";
+                                txtTwTotalAsset.Text = $"台股總資產：{totalAsset:N0}";
                                 txtTwTotalPnL.Text = text;
                                 txtTwTotalPnL.Foreground = totalPnl >= 0 ? new SolidColorBrush(Color.FromRgb(39, 174, 96)) : new SolidColorBrush(Color.FromRgb(231, 76, 60));
                                 txtTwRealizedPnL.Text = realizedText;
@@ -1458,6 +1582,153 @@ namespace StockManager
                 private void BtnTwSellHolding_Click(object sender, RoutedEventArgs e)
                 {
                         SellHolding("TW", dgTwHoldings, txtTwSellQty, txtTwSellPrice);
+                }
+
+                private void BtnUsSetCash_Click(object sender, RoutedEventArgs e)
+                {
+                        var value = PromptCashAmount("設定美股初始金額", _usCashBalance);
+                        if (!value.HasValue)
+                        {
+                                return;
+                        }
+
+                        _usCashBalance = value.Value;
+                        SaveCashBalance("US");
+                        UpdateHoldingSummary("US");
+                }
+
+                private void BtnTwSetCash_Click(object sender, RoutedEventArgs e)
+                {
+                        var value = PromptCashAmount("設定台股初始金額", _twCashBalance);
+                        if (!value.HasValue)
+                        {
+                                return;
+                        }
+
+                        _twCashBalance = value.Value;
+                        SaveCashBalance("TW");
+                        UpdateHoldingSummary("TW");
+                }
+
+                private double? PromptCashAmount(string title, double currentValue)
+                {
+
+                        var dialog = new Window
+                        {
+                                Title = title,
+                                Width = 360,
+                                Height = 180,
+                                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                                ResizeMode = ResizeMode.NoResize,
+                                Owner = this,
+                                Background = (Brush)new BrushConverter().ConvertFromString("#F5F7FA")
+                        };
+
+                        var root = new Grid { Margin = new Thickness(16) };
+                        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+                        var titleText = new TextBlock
+                        {
+                                Text = "請輸入初始金額",
+                                FontWeight = FontWeights.Bold,
+                                Foreground = (Brush)new BrushConverter().ConvertFromString("#2C3E50")
+                        };
+
+                        var amountTextBox = new TextBox
+                        {
+                                Height = 30,
+                                Margin = new Thickness(0, 8, 0, 0),
+                                VerticalContentAlignment = VerticalAlignment.Center,
+                                Text = currentValue.ToString("F2")
+                        };
+
+                        var tipText = new TextBlock
+                        {
+                                Text = "金額不可小於 0",
+                                FontSize = 11,
+                                Foreground = (Brush)new BrushConverter().ConvertFromString("#607D8B"),
+                                Margin = new Thickness(0, 8, 0, 0)
+                        };
+
+                        var okButton = new Button
+                        {
+                                Content = "確定",
+                                Width = 80,
+                                Height = 30,
+                                Margin = new Thickness(0, 0, 8, 0),
+                                Background = (Brush)new BrushConverter().ConvertFromString("#27AE60"),
+                                Foreground = Brushes.White,
+                                BorderThickness = new Thickness(0),
+                                IsDefault = true
+                        };
+
+                        var cancelButton = new Button
+                        {
+                                Content = "取消",
+                                Width = 80,
+                                Height = 30,
+                                Background = (Brush)new BrushConverter().ConvertFromString("#95A5A6"),
+                                Foreground = Brushes.White,
+                                BorderThickness = new Thickness(0),
+                                IsCancel = true
+                        };
+
+                        bool isConfirmed = false;
+                        double confirmedAmount = 0;
+                        okButton.Click += (s, e) =>
+                        {
+                                if (!double.TryParse((amountTextBox.Text ?? string.Empty).Trim(), out double parsed) || parsed < 0)
+                                {
+                                        MessageBox.Show("請輸入正確金額（不可小於 0）", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                                        amountTextBox.Focus();
+                                        amountTextBox.SelectAll();
+                                        return;
+                                }
+
+                                confirmedAmount = parsed;
+                                isConfirmed = true;
+                                dialog.DialogResult = true;
+                        };
+
+                        cancelButton.Click += (s, e) =>
+                        {
+                                dialog.DialogResult = false;
+                        };
+
+                        var buttonPanel = new StackPanel
+                        {
+                                Orientation = Orientation.Horizontal,
+                                HorizontalAlignment = HorizontalAlignment.Right,
+                                Margin = new Thickness(0, 12, 0, 0)
+                        };
+                        buttonPanel.Children.Add(okButton);
+                        buttonPanel.Children.Add(cancelButton);
+
+                        Grid.SetRow(titleText, 0);
+                        Grid.SetRow(amountTextBox, 1);
+                        Grid.SetRow(tipText, 2);
+                        Grid.SetRow(buttonPanel, 3);
+                        root.Children.Add(titleText);
+                        root.Children.Add(amountTextBox);
+                        root.Children.Add(tipText);
+                        root.Children.Add(buttonPanel);
+
+                        dialog.Content = root;
+                        dialog.Loaded += (s, e) =>
+                        {
+                                amountTextBox.Focus();
+                                amountTextBox.SelectAll();
+                        };
+
+                        if (dialog.ShowDialog() != true || !isConfirmed)
+                        {
+                                return null;
+                        }
+
+                        return confirmedAmount;
                 }
 
                 private void DgUsHoldings_SelectionChanged(object sender, SelectionChangedEventArgs e)

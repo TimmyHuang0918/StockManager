@@ -9,7 +9,9 @@ using System.Net;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Shell;
 using System.Windows.Shapes;
 using System.Web.Script.Serialization;
 using StockManager.Config;
@@ -356,7 +358,7 @@ namespace StockManager
             Grid.SetRow(contentBorder, 1);
             layoutRoot.Children.Add(headerPanel);
             layoutRoot.Children.Add(contentBorder);
-            win.Content = layoutRoot;
+            ApplyDarkTitleWindowChrome(win, win.Title, layoutRoot);
 
             win.ShowDialog();
         }
@@ -746,16 +748,15 @@ namespace StockManager
             controlPanel.Children.Add(period1YButton);
             controlPanel.Children.Add(realtimeStatusText);
 
-            var klineContainer = new StackPanel
-            {
-                Orientation = Orientation.Vertical
-            };
+            var klineGrid = new Grid();
+            klineGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            klineGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
             var klineScrollViewer = new ScrollViewer
             {
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-                Content = klineContainer
+                Content = klineGrid
             };
 
             var rowSplitter = new GridSplitter
@@ -829,13 +830,21 @@ namespace StockManager
 
                 Action<string> renderMessage = message =>
                 {
-                    klineContainer.Children.Clear();
-                    klineContainer.Children.Add(new TextBlock
+                    klineGrid.Children.Clear();
+                    klineGrid.RowDefinitions.Clear();
+                    klineGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+                    var messageText = new TextBlock
                     {
                         Text = message,
-                        Foreground = Brushes.Gray,
+                        Foreground = Brushes.White,
                         Margin = new Thickness(10, 6, 0, 6)
-                    });
+                    };
+
+                    Grid.SetRow(messageText, 0);
+                    Grid.SetColumn(messageText, 0);
+                    Grid.SetColumnSpan(messageText, 2);
+                    klineGrid.Children.Add(messageText);
                 };
 
                 var selectedSnapshot = selectedForChart
@@ -904,7 +913,10 @@ namespace StockManager
                         return;
                     }
 
-                    klineContainer.Children.Clear();
+                    klineGrid.Children.Clear();
+                    klineGrid.RowDefinitions.Clear();
+                    klineGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
                     var singleCanvas = new Canvas
                     {
                         Height = 250,
@@ -912,7 +924,11 @@ namespace StockManager
                         ClipToBounds = true,
                         Margin = new Thickness(0, 0, 0, 6)
                     };
-                    klineContainer.Children.Add(singleCanvas);
+
+                    Grid.SetRow(singleCanvas, 0);
+                    Grid.SetColumn(singleCanvas, 0);
+                    Grid.SetColumnSpan(singleCanvas, 2);
+                    klineGrid.Children.Add(singleCanvas);
                     DrawKLineChart(singleCanvas, history, $"{selected.Ticker} {selected.Name}");
                     realtimeStatusText.Text = isRealtimeMode
                         ? $"即時模式中（20秒）｜K線：{selected.Ticker}"
@@ -926,7 +942,10 @@ namespace StockManager
                     return;
                 }
 
-                klineContainer.Children.Clear();
+                klineGrid.Children.Clear();
+                klineGrid.RowDefinitions.Clear();
+
+                var renderedCount = 0;
                 foreach (var selected in selectedForChart)
                 {
                     List<KLinePoint> history;
@@ -940,13 +959,29 @@ namespace StockManager
                         Height = 250,
                         Background = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#1F2A3D"),
                         ClipToBounds = true,
-                        Margin = new Thickness(0, 0, 0, 8)
+                        Margin = new Thickness(0, 0, 8, 8)
                     };
-                    klineContainer.Children.Add(chartCanvas);
+
+                    var rowIndex = renderedCount / 2;
+                    var columnIndex = renderedCount % 2;
+                    while (klineGrid.RowDefinitions.Count <= rowIndex)
+                    {
+                        klineGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                    }
+
+                    if (columnIndex == 1)
+                    {
+                        chartCanvas.Margin = new Thickness(8, 0, 0, 8);
+                    }
+
+                    Grid.SetRow(chartCanvas, rowIndex);
+                    Grid.SetColumn(chartCanvas, columnIndex);
+                    klineGrid.Children.Add(chartCanvas);
                     DrawKLineChart(chartCanvas, history, $"{selected.Ticker} {selected.Name}");
+                    renderedCount++;
                 }
 
-                if (klineContainer.Children.Count == 0)
+                if (renderedCount == 0)
                 {
                     renderMessage("勾選股票皆無法載入 K 線資料");
                     return;
@@ -1055,7 +1090,7 @@ namespace StockManager
             layoutRoot.Children.Add(contentBorder);
             layoutRoot.Children.Add(rowSplitter);
             layoutRoot.Children.Add(chartBorder);
-            detailWindow.Content = layoutRoot;
+            ApplyDarkTitleWindowChrome(detailWindow, detailWindow.Title, layoutRoot);
 
             detailWindow.Loaded += async (s, e) =>
             {
@@ -1110,6 +1145,129 @@ namespace StockManager
             detailWindow.Closed += (s, e) => realtimeTimer.Stop();
 
             detailWindow.ShowDialog();
+        }
+
+        private void ApplyDarkTitleWindowChrome(Window window, string title, UIElement content)
+        {
+            window.WindowStyle = WindowStyle.None;
+            window.ResizeMode = ResizeMode.CanResize;
+
+            WindowChrome.SetWindowChrome(window, new WindowChrome
+            {
+                CaptionHeight = 40,
+                ResizeBorderThickness = new Thickness(6),
+                CornerRadius = new CornerRadius(0),
+                GlassFrameThickness = new Thickness(0),
+                UseAeroCaptionButtons = false
+            });
+
+            var root = new Grid();
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+            var titleBar = new Border
+            {
+                Height = 40,
+                Background = (Brush)new BrushConverter().ConvertFromString("#111827")
+            };
+
+            titleBar.MouseLeftButtonDown += (s, e) =>
+            {
+                if (e.ClickCount == 2)
+                {
+                    window.WindowState = window.WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+                    return;
+                }
+
+                if (e.LeftButton == MouseButtonState.Pressed)
+                {
+                    window.DragMove();
+                }
+            };
+
+            var titleGrid = new Grid();
+            titleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            titleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var titleText = new TextBlock
+            {
+                Text = title,
+                Foreground = (Brush)new BrushConverter().ConvertFromString("#E5E7EB"),
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(12, 0, 0, 0),
+                FontSize = 13,
+                FontWeight = FontWeights.SemiBold
+            };
+
+            var buttonPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right
+            };
+
+            var btnMin = new Button
+            {
+                Content = "－",
+                Width = 46,
+                Height = 40,
+                Background = Brushes.Transparent,
+                Foreground = (Brush)new BrushConverter().ConvertFromString("#D1D5DB"),
+                BorderThickness = new Thickness(0),
+                FontSize = 13
+            };
+            WindowChrome.SetIsHitTestVisibleInChrome(btnMin, true);
+            btnMin.Click += (s, e) => window.WindowState = WindowState.Minimized;
+
+            var btnMax = new Button
+            {
+                Content = "□",
+                Width = 46,
+                Height = 40,
+                Background = Brushes.Transparent,
+                Foreground = (Brush)new BrushConverter().ConvertFromString("#D1D5DB"),
+                BorderThickness = new Thickness(0),
+                FontSize = 12
+            };
+            WindowChrome.SetIsHitTestVisibleInChrome(btnMax, true);
+            btnMax.Click += (s, e) =>
+            {
+                window.WindowState = window.WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+            };
+
+            var btnClose = new Button
+            {
+                Content = "✕",
+                Width = 46,
+                Height = 40,
+                Background = Brushes.Transparent,
+                Foreground = (Brush)new BrushConverter().ConvertFromString("#F9FAFB"),
+                BorderThickness = new Thickness(0),
+                FontSize = 12
+            };
+            WindowChrome.SetIsHitTestVisibleInChrome(btnClose, true);
+            btnClose.Click += (s, e) => window.Close();
+
+            window.StateChanged += (s, e) =>
+            {
+                btnMax.Content = window.WindowState == WindowState.Maximized ? "❐" : "□";
+            };
+
+            buttonPanel.Children.Add(btnMin);
+            buttonPanel.Children.Add(btnMax);
+            buttonPanel.Children.Add(btnClose);
+
+            Grid.SetColumn(titleText, 0);
+            Grid.SetColumn(buttonPanel, 1);
+            titleGrid.Children.Add(titleText);
+            titleGrid.Children.Add(buttonPanel);
+            titleBar.Child = titleGrid;
+
+            Grid.SetRow(titleBar, 0);
+            Grid.SetRow(content, 1);
+            root.Children.Add(titleBar);
+            root.Children.Add(content);
+
+            window.Content = root;
         }
 
         private bool TryLoadHistoricalDataFromYFinanceForKLine(string ticker, string period, string interval, List<KLinePoint> target)
@@ -1282,7 +1440,7 @@ namespace StockManager
                 {
                     Text = priceLabel.ToString("F2"),
                     FontSize = 10,
-                    Foreground = Brushes.DimGray
+                    Foreground = Brushes.White
                 };
                 Canvas.SetLeft(yText, 4);
                 Canvas.SetTop(yText, y - 8);
@@ -1317,7 +1475,7 @@ namespace StockManager
                     {
                         Text = hasIntraday ? recent[idx].Date.ToString("HH:mm") : recent[idx].Date.ToString("MM/dd"),
                         FontSize = 9,
-                        Foreground = Brushes.DimGray
+                        Foreground = Brushes.White
                     };
                     Canvas.SetLeft(dateText, x - 16);
                     Canvas.SetTop(dateText, priceBottom + 4);
@@ -1329,8 +1487,8 @@ namespace StockManager
             {
                 Text = "成交量",
                 FontSize = 10,
-                Foreground = Brushes.DimGray
-            });
+                Foreground = Brushes.White
+	    });
             Canvas.SetLeft(chartCanvas.Children[chartCanvas.Children.Count - 1], 4);
             Canvas.SetTop(chartCanvas.Children[chartCanvas.Children.Count - 1], volumeTop - 2);
 
@@ -1339,8 +1497,8 @@ namespace StockManager
                 Text = $"K線（近{recent.Count}日） {title}",
                 FontSize = 12,
                 FontWeight = FontWeights.Bold,
-                Foreground = Brushes.DimGray
-            };
+                Foreground = Brushes.White
+	    };
             Canvas.SetLeft(titleBlock, chartLeft);
             Canvas.SetTop(titleBlock, 0);
             chartCanvas.Children.Add(titleBlock);
@@ -1425,8 +1583,8 @@ namespace StockManager
             {
                 Text = "MA5(黃)  MA20(紫)",
                 FontSize = 10,
-                Foreground = Brushes.DimGray
-            };
+                Foreground = Brushes.White
+	    };
             Canvas.SetLeft(legend, chartRight - 100);
             Canvas.SetTop(legend, 4);
             chartCanvas.Children.Add(legend);
