@@ -198,6 +198,7 @@
                         Click="BtnAddHoldingUser_Click" Background="#546E7A" Foreground="White" FontWeight="Bold" BorderThickness="0" Cursor="Hand"/>
                 <Button x:Name="btnDeleteHoldingUser" Content="刪除使用者" Width="96" Height="30" Margin="8,0,0,0" Style="{StaticResource  RoundedButton}"
                         Click="BtnDeleteHoldingUser_Click" Background="#546E7A" Foreground="White" FontWeight="Bold" BorderThickness="0" Cursor="Hand"/>
+                <Button Content="TestCode" Click="Button_Click"/>
             </StackPanel>
         </Border>
 

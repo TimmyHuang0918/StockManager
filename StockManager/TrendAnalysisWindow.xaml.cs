@@ -664,7 +664,8 @@ namespace StockManager
 
                 private void UpdateMajorNewsTable()
                 {
-                        if (dgMajorNews == null)
+                        var majorNewsGrid = FindName("dgMajorNews") as DataGrid;
+                        if (majorNewsGrid == null)
                         {
                                 return;
                         }
@@ -702,12 +703,12 @@ namespace StockManager
                                         }
                                 }
 
-                                dgMajorNews.ItemsSource = news;
+                                majorNewsGrid.ItemsSource = news;
                         }
                         catch (Exception ex)
                         {
                                 Console.WriteLine($"[重大新聞] 載入失敗: {ex.Message}");
-                                dgMajorNews.ItemsSource = new List<MajorNewsItem>
+                                majorNewsGrid.ItemsSource = new List<MajorNewsItem>
                                 {
                                         new MajorNewsItem { Time = "--", Title = "目前無法取得重大新聞", ImpactLevel = "--" }
                                 };
@@ -2634,14 +2635,14 @@ namespace StockManager
                                 if (txtCurrentRecommendation != null)
                                 {
                                         txtCurrentRecommendation.Text = $"偏多（買入）｜評分 {score}/100｜建議分批布局，止損參考 ${currentPrice * 0.95:F2}";
-                                        txtCurrentRecommendation.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1B5E20"));
+                                        txtCurrentRecommendation.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#7FE3C8"));
                                 }
 
                                 txtSuggestionTitle.Text = "💰 強烈買入建議";
                                 if (suggestionBorderElement != null)
                                 {
-                                        suggestionBorderElement.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#E8F5E9"));
-                                        suggestionBorderElement.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#4CAF50"));
+                                        suggestionBorderElement.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1E3A30"));
+                                        suggestionBorderElement.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#2E7D6E"));
                                 }
                                 if (suggestionTextBlock != null)
                                 {
@@ -2660,14 +2661,14 @@ namespace StockManager
                                 if (txtCurrentRecommendation != null)
                                 {
                                         txtCurrentRecommendation.Text = $"中性（觀望）｜評分 {score}/100｜等待突破訊號再加碼";
-                                        txtCurrentRecommendation.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#E65100"));
+                                        txtCurrentRecommendation.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFD17A"));
                                 }
 
                                 txtSuggestionTitle.Text = "📊 持有觀望";
                                 if (suggestionBorderElement != null)
                                 {
-                                        suggestionBorderElement.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFF3E0"));
-                                        suggestionBorderElement.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FF9800"));
+                                        suggestionBorderElement.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#3A2F1F"));
+                                        suggestionBorderElement.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#A8792F"));
                                 }
                                 if (suggestionTextBlock != null)
                                 {
@@ -2686,14 +2687,14 @@ namespace StockManager
                                 if (txtCurrentRecommendation != null)
                                 {
                                         txtCurrentRecommendation.Text = $"偏空（減碼/賣出）｜評分 {score}/100｜控制風險，等待回穩再評估";
-                                        txtCurrentRecommendation.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#B71C1C"));
+                                        txtCurrentRecommendation.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FF9AA8"));
                                 }
 
                                 txtSuggestionTitle.Text = "⚠️ 建議賣出";
                                 if (suggestionBorderElement != null)
                                 {
-                                        suggestionBorderElement.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFEBEE"));
-                                        suggestionBorderElement.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#F44336"));
+                                        suggestionBorderElement.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#3A2428"));
+                                        suggestionBorderElement.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#C04A62"));
                                 }
                                 if (suggestionTextBlock != null)
                                 {

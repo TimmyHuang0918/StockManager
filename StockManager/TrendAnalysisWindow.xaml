@@ -390,67 +390,91 @@
 						<TextBlock Text="💡 AI 智能分析" FontSize="18" FontWeight="Bold" Foreground="#E3ECF5" Margin="0,0,0,20"/>
 
 						<!-- 最新重大新聞 -->
-						<Border Background="#1F2A3D" BorderBrush="#2E3A4F" BorderThickness="1" CornerRadius="8" Padding="15" Margin="0,0,0,15">
+						<Border Background="#162133" BorderBrush="#35506D" BorderThickness="1" CornerRadius="8" Padding="15" Margin="0,0,0,15">
 							<StackPanel>
-								<TextBlock Text="📰 最新重大新聞" FontSize="15" FontWeight="Bold" Foreground="#CFE3F7" Margin="0,0,0,10"/>
-								<DataGrid x:Name="dgMajorNews" AutoGenerateColumns="False" IsReadOnly="True" Height="170"
-                                                                          HeadersVisibility="Column" CanUserAddRows="False" FontSize="11"
-                                                                          AlternatingRowBackground="#24334A" GridLinesVisibility="Horizontal"
-                                                                          Background="#1F2A3D" Foreground="#E3ECF5">
+								<TextBlock Text="📰 最新重大新聞" FontSize="15" FontWeight="Bold" Foreground="#9FD3FF" Margin="0,0,0,10"/>
+								<DataGrid x:Name="dgMajorNews" AutoGenerateColumns="False"
+									 Background="#1E2C2A"
+									Foreground="White" 
+									GridLinesVisibility="None"
+									HeadersVisibility="All">
+
+									<!-- 標題列樣式 -->
+									<DataGrid.ColumnHeaderStyle>
+										<Style TargetType="DataGridColumnHeader">
+											<Setter Property="Foreground" Value="White"/>
+											<!-- 標題文字白色 -->
+											<Setter Property="FontWeight" Value="Bold"/>
+											<Setter Property="Background" Value="#263238"/>
+											<!-- 標題背景深灰藍 -->
+										</Style>
+									</DataGrid.ColumnHeaderStyle>
+
+									<!-- 資料列樣式 -->
+									<DataGrid.CellStyle>
+										<Style TargetType="DataGridCell">
+											<Setter Property="Foreground" Value="White"/>
+											<!-- 資料列文字白色 -->
+											<Setter Property="Background" Value="#1E2C2A"/>
+											<!-- 資料列背景深色 -->
+										</Style>
+									</DataGrid.CellStyle>
+
 									<DataGrid.Columns>
 										<DataGridTextColumn Header="時間" Binding="{Binding Time}" Width="90"/>
 										<DataGridTextColumn Header="重大新聞標題" Binding="{Binding Title}" Width="*"/>
 										<DataGridTextColumn Header="影響程度" Binding="{Binding ImpactLevel}" Width="80"/>
 									</DataGrid.Columns>
 								</DataGrid>
+
 							</StackPanel>
 						</Border>
 
 						<!-- 綜合評分 -->
-						<Border BorderBrush="#8E24AA" BorderThickness="2" CornerRadius="8" Padding="25" Margin="0,0,0,20">
+						<Border BorderBrush="#5E6AD2" BorderThickness="2" CornerRadius="8" Padding="25" Margin="0,0,0,20">
 							<Border.Background>
 								<LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-									<GradientStop Color="#2D2140" Offset="0"/>
-									<GradientStop Color="#3B2854" Offset="1"/>
+									<GradientStop Color="#1F2336" Offset="0"/>
+									<GradientStop Color="#2A2F47" Offset="1"/>
 								</LinearGradientBrush>
 							</Border.Background>
 							<StackPanel>
-								<TextBlock Text="綜合評分" FontSize="16" FontWeight="Bold" Foreground="#D7B8FF" Margin="0,0,0,15"/>
+								<TextBlock Text="綜合評分" FontSize="16" FontWeight="Bold" Foreground="#C8D1FF" Margin="0,0,0,15"/>
 								<Grid>
 									<Grid.ColumnDefinitions>
 										<ColumnDefinition Width="Auto"/>
 										<ColumnDefinition Width="*"/>
 									</Grid.ColumnDefinitions>
-									<TextBlock x:Name="txtScore" Text="--" FontSize="48" FontWeight="Bold" Grid.Column="0" Margin="0,0,20,0"/>
+									<TextBlock x:Name="txtScore" Text="--" FontSize="48" FontWeight="Bold" Grid.Column="0" Margin="0,0,20,0" Foreground="#C8D1FF" />
 									<StackPanel Grid.Column="1" VerticalAlignment="Center">
-										<ProgressBar x:Name="pbScore" Height="30" Maximum="100" Foreground="#9C27B0"/>
-										<TextBlock x:Name="txtScoreLevel" Text="評估中..." FontSize="14" FontWeight="Bold" Margin="0,10,0,0" Foreground="#D7B8FF"/>
+										<ProgressBar x:Name="pbScore" Height="30" Maximum="100" Foreground="#7C8DFF"/>
+										<TextBlock x:Name="txtScoreLevel" Text="評估中..." FontSize="14" FontWeight="Bold" Margin="0,10,0,0" Foreground="#C8D1FF"/>
 									</StackPanel>
 								</Grid>
 							</StackPanel>
 						</Border>
 
 						<!-- 財報分析 -->
-						<Border Background="#22352B" BorderBrush="#4CAF50" BorderThickness="2" CornerRadius="8" Padding="20" Margin="0,0,0,15">
+						<Border Background="#1E2C2A" BorderBrush="#2E7D6E" BorderThickness="2" CornerRadius="8" Padding="20" Margin="0,0,0,15">
 							<StackPanel>
-								<TextBlock Text="📑 財報數據分析（yfinance）" FontSize="15" FontWeight="Bold" Foreground="#8BE0AE" Margin="0,0,0,10"/>
-								<TextBlock x:Name="txtFundamentalAnalysis" Text="載入財報數據中..." TextWrapping="Wrap" FontSize="12" LineHeight="20" Foreground="#D8E6F3"/>
+								<TextBlock Text="📑 財報數據分析（yfinance）" FontSize="15" FontWeight="Bold" Foreground="#7FE3C8" Margin="0,0,0,10"/>
+								<TextBlock x:Name="txtFundamentalAnalysis" Text="載入財報數據中..." TextWrapping="Wrap" FontSize="12" LineHeight="20" Foreground="#E0F7FA"/>
 							</StackPanel>
 						</Border>
 
 						<!-- 買賣建議 -->
-						<Border x:Name="suggestionBorder" Background="#22352B" BorderBrush="#4CAF50" BorderThickness="2" CornerRadius="8" Padding="20" Margin="0,0,0,15">
+						<Border x:Name="suggestionBorder" Background="#1F2633" BorderBrush="#4A5E80" BorderThickness="2" CornerRadius="8" Padding="20" Margin="0,0,0,15">
 							<StackPanel>
-								<TextBlock x:Name="txtSuggestionTitle" Text="💰 投資建議" FontSize="15" FontWeight="Bold" Foreground="#8BE0AE" Margin="0,0,0,10"/>
-								<TextBlock x:Name="txtSuggestion" TextWrapping="Wrap" FontSize="13" LineHeight="22" Foreground="#D8E6F3"/>
+								<TextBlock x:Name="txtSuggestionTitle" Text="💰 投資建議" FontSize="15" FontWeight="Bold" Foreground="#A9C7FF" Margin="0,0,0,10"/>
+								<TextBlock x:Name="txtSuggestion" TextWrapping="Wrap" FontSize="13" LineHeight="22" Foreground="#E3ECF5"/>
 							</StackPanel>
 						</Border>
 
 						<!-- 風險提示 -->
-						<Border Background="#3E2428" BorderBrush="#F44336" BorderThickness="2" CornerRadius="8" Padding="20">
+						<Border Background="#332127" BorderBrush="#C04A62" BorderThickness="2" CornerRadius="8" Padding="20">
 							<StackPanel>
-								<TextBlock Text="⚠️ 風險提示" FontSize="15" FontWeight="Bold" Foreground="#C62828" Margin="0,0,0,10"/>
-								<TextBlock x:Name="txtRiskWarning" TextWrapping="Wrap" FontSize="12" LineHeight="20" Foreground="#FFD3D3"/>
+								<TextBlock Text="⚠️ 風險提示" FontSize="15" FontWeight="Bold" Foreground="#FF92A6" Margin="0,0,0,10"/>
+								<TextBlock x:Name="txtRiskWarning" TextWrapping="Wrap" FontSize="12" LineHeight="20" Foreground="#FFD8DF"/>
 							</StackPanel>
 						</Border>
 					</StackPanel>
