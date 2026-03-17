@@ -281,25 +281,25 @@
 						<!-- K 線主圖 -->
 						<TextBlock Text="K 線價格走勢" FontSize="13" FontWeight="SemiBold" Foreground="#B0BEC5" Margin="0,0,0,6"/>
 						<Border Background="#1F2A3D" BorderBrush="#2E3A4F" BorderThickness="1" CornerRadius="5" Padding="10" MinHeight="280">
-							<Canvas x:Name="chartCanvas" Background="#1F2A3D" SizeChanged="ChartCanvas_SizeChanged" MouseMove="ChartCanvas_MouseMove" MouseLeave="ChartCanvas_MouseLeave"/>
+							<Canvas x:Name="chartCanvas" Height="250" Background="#1F2A3D" SizeChanged="ChartCanvas_SizeChanged" MouseMove="ChartCanvas_MouseMove" MouseLeave="ChartCanvas_MouseLeave"/>
 						</Border>
 
 						<!-- 成交量子圖 -->
 						<TextBlock Text="成交量" FontSize="13" FontWeight="SemiBold" Foreground="#B0BEC5" Margin="0,15,0,6"/>
 						<Border Background="#1F2A3D" BorderBrush="#2E3A4F" BorderThickness="1" CornerRadius="5" Padding="10" Height="140">
-							<Canvas x:Name="volumeCanvas" Background="#1F2A3D" SizeChanged="IndicatorCanvas_SizeChanged"/>
+							<Canvas x:Name="volumeCanvas" Height="110" Background="#1F2A3D" SizeChanged="IndicatorCanvas_SizeChanged"/>
 						</Border>
 
 						<!-- MACD 子圖 -->
 						<TextBlock Text="MACD" FontSize="13" FontWeight="SemiBold" Foreground="#B0BEC5" Margin="0,15,0,6"/>
 						<Border Background="#1F2A3D" BorderBrush="#2E3A4F" BorderThickness="1" CornerRadius="5" Padding="10" Height="140">
-							<Canvas x:Name="macdCanvas" Background="#1F2A3D" SizeChanged="IndicatorCanvas_SizeChanged"/>
+							<Canvas x:Name="macdCanvas" Height="110" Background="#1F2A3D" SizeChanged="IndicatorCanvas_SizeChanged"/>
 						</Border>
 
 						<!-- RSI 子圖 -->
 						<TextBlock Text="RSI" FontSize="13" FontWeight="SemiBold" Foreground="#B0BEC5" Margin="0,15,0,6"/>
 						<Border Background="#1F2A3D" BorderBrush="#2E3A4F" BorderThickness="1" CornerRadius="5" Padding="10" Height="140">
-							<Canvas x:Name="rsiCanvas" Background="#1F2A3D" SizeChanged="IndicatorCanvas_SizeChanged"/>
+							<Canvas x:Name="rsiCanvas" Height="110" Background="#1F2A3D" SizeChanged="IndicatorCanvas_SizeChanged"/>
 						</Border>
 					</StackPanel>
 				</ScrollViewer>

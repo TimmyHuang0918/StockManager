@@ -77,7 +77,6 @@ namespace StockManager
                                 throw;
                         }
                 }
-
                 private List<CandlestickData> GetDisplayData(List<CandlestickData> data, int candleCount = 0)
                 {
                         if (data == null || data.Count == 0)
@@ -472,6 +471,22 @@ namespace StockManager
                                         }
                                 }
 
+                                // 若即時價失敗，改用歷史資料最新收盤價回補，避免分析內容整體空白
+                                if (!currentPrice.HasValue)
+                                {
+                                        double? fallbackChangePercent;
+                                        var fallbackPrice = TryGetFallbackPriceFromHistory(out fallbackChangePercent);
+                                        if (fallbackPrice.HasValue)
+                                        {
+                                                currentPrice = fallbackPrice;
+                                                if (!changePercent.HasValue && fallbackChangePercent.HasValue)
+                                                {
+                                                        changePercent = fallbackChangePercent;
+                                                }
+                                                Console.WriteLine($"[趨勢視窗] 使用歷史資料回補價格: {currentPrice.Value:F2}");
+                                        }
+                                }
+
                                 Console.WriteLine($"[趨勢視窗] txtChange 狀態: null={txtChange == null}");
 
                                 if (currentPrice.HasValue)
@@ -860,6 +875,58 @@ namespace StockManager
                                 MACDAnalysis = macdAnalysis,
                                 HistogramColorHex = histColor
                         };
+                }
+
+                private double? TryGetFallbackPriceFromHistory(out double? fallbackChangePercent)
+                {
+                        fallbackChangePercent = null;
+
+                        try
+                        {
+                                var tempData = new List<CandlestickData>();
+                                var historyPeriod = _currentPeriod;
+                                var historyInterval = "1d";
+
+                                if (string.Equals(_currentPeriod, "5m", StringComparison.OrdinalIgnoreCase))
+                                {
+                                        var bars = Math.Max(1, _intradayBarCount);
+                                        if (bars <= 390)
+                                        {
+                                                historyPeriod = "5d";
+                                        }
+                                        else if (bars <= 1560)
+                                        {
+                                                historyPeriod = "1mo";
+                                        }
+                                        else
+                                        {
+                                                historyPeriod = "3mo";
+                                        }
+                                        historyInterval = "5m";
+                                }
+
+                                if (!TryLoadHistoricalDataFromYFinance(_ticker, historyPeriod, historyInterval, tempData) || tempData.Count == 0)
+                                {
+                                        return null;
+                                }
+
+                                var latest = tempData[tempData.Count - 1];
+                                if (tempData.Count >= 2)
+                                {
+                                        var previousClose = tempData[tempData.Count - 2].Close;
+                                        if (Math.Abs(previousClose) > 0.000001)
+                                        {
+                                                fallbackChangePercent = (latest.Close - previousClose) / previousClose * 100;
+                                        }
+                                }
+
+                                return latest.Close;
+                        }
+                        catch (Exception ex)
+                        {
+                                Console.WriteLine($"[趨勢視窗] 歷史資料回補價格失敗: {ex.Message}");
+                                return null;
+                        }
                 }
 
                 private class AnalysisCalculationResult
@@ -2223,39 +2290,36 @@ namespace StockManager
                 private string ResolveYFinanceExecutablePath()
                 {
                         var baseDir = AppDomain.CurrentDomain.BaseDirectory;
-
-                        var outputPath = System.IO.Path.Combine(baseDir, "Python", "yfinance_fetcher.exe");
-                        if (File.Exists(outputPath))
+                        var candidates = new[]
                         {
-                                return outputPath;
-                        }
+                                System.IO.Path.Combine(baseDir, "Python", "yfinance_fetcher.exe"),
+                                System.IO.Path.GetFullPath(System.IO.Path.Combine(baseDir, "..", "Python", "yfinance_fetcher.exe")),
+                                System.IO.Path.GetFullPath(System.IO.Path.Combine(baseDir, "..", "..", "Python", "yfinance_fetcher.exe")),
+                                System.IO.Path.GetFullPath(System.IO.Path.Combine(baseDir, "..", "..", "..", "Python", "yfinance_fetcher.exe")),
+                                System.IO.Path.GetFullPath(System.IO.Path.Combine(baseDir, "..", "..", "..", "Python", "dist", "yfinance_fetcher.exe")),
+                                System.IO.Path.GetFullPath(System.IO.Path.Combine(baseDir, "..", "..", "..", "..", "Python", "dist", "yfinance_fetcher.exe")),
+                                System.IO.Path.GetFullPath(System.IO.Path.Combine(baseDir, "..", "..", "..", "..", "Installer", "staging", "Python", "yfinance_fetcher.exe"))
+                        };
 
-                        var projectDistPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(baseDir, "..", "..", "Python", "dist", "yfinance_fetcher.exe"));
-                        if (File.Exists(projectDistPath))
-                        {
-                                return projectDistPath;
-                        }
-
-                        return outputPath;
+                        var existing = candidates.FirstOrDefault(File.Exists);
+                        return existing ?? candidates[0];
                 }
 
                 private string ResolveYFinanceScriptPath()
                 {
                         var baseDir = AppDomain.CurrentDomain.BaseDirectory;
-
-                        var outputPath = System.IO.Path.Combine(baseDir, AppConfig.YFinanceScriptPath);
-                        if (File.Exists(outputPath))
+                        var candidates = new[]
                         {
-                                return outputPath;
-                        }
+                                System.IO.Path.Combine(baseDir, AppConfig.YFinanceScriptPath),
+                                System.IO.Path.GetFullPath(System.IO.Path.Combine(baseDir, "..", AppConfig.YFinanceScriptPath)),
+                                System.IO.Path.GetFullPath(System.IO.Path.Combine(baseDir, "..", "..", AppConfig.YFinanceScriptPath)),
+                                System.IO.Path.GetFullPath(System.IO.Path.Combine(baseDir, "..", "..", "..", AppConfig.YFinanceScriptPath)),
+                                System.IO.Path.GetFullPath(System.IO.Path.Combine(baseDir, "..", "..", "..", "..", AppConfig.YFinanceScriptPath)),
+                                System.IO.Path.GetFullPath(System.IO.Path.Combine(baseDir, "..", "..", "..", "..", "Installer", "staging", "Python", "yfinance_fetcher.py"))
+                        };
 
-                        var projectPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(baseDir, "..", "..", AppConfig.YFinanceScriptPath));
-                        if (File.Exists(projectPath))
-                        {
-                                return projectPath;
-                        }
-
-                        return outputPath;
+                        var existing = candidates.FirstOrDefault(File.Exists);
+                        return existing ?? candidates[0];
                 }
 
                 private void UpdateFundamentalAnalysis()
@@ -2267,11 +2331,7 @@ namespace StockManager
 
                         try
                         {
-                                var scriptPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, AppConfig.YFinanceScriptPath);
-                                if (!File.Exists(scriptPath))
-                                {
-                                        scriptPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", AppConfig.YFinanceScriptPath));
-                                }
+                                var scriptPath = ResolveYFinanceScriptPath();
 
                                 if (!File.Exists(scriptPath))
                                 {

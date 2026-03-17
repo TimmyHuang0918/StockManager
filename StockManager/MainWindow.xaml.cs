@@ -1,4 +1,5 @@
 ﻿using SKCOMLib;
+using SKDLLCSharp;
 using StockManager.Config;
 using StockManager.Models;
 using StockManager.Services;
@@ -25,6 +26,7 @@ using System.Windows.Navigation;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 using System.Xml.Linq;
+using StockInfo = StockManager.Models.StockInfo;
 
 namespace StockManager
 {
@@ -2260,69 +2262,70 @@ namespace StockManager
             base.OnClosed(e);
         }
 
-	private object CreateComObject(string progId)
-	{
-	    var type = Type.GetTypeFromProgID(progId);
-	    if (type == null)
-	    {
-		return null;
-	    }
-
-	    return Activator.CreateInstance(type);
-	}
-
-	private int InvokeComInt(object target, string methodName, object[] args)
-	{
-	    if (target == null)
-	    {
-		return -1;
-	    }
-
-	    var result = target.GetType().InvokeMember(
-		methodName,
-		BindingFlags.InvokeMethod,
-		null,
-		target,
-		args);
-
-	    return result is int ? (int)result : -1;
-	}
-
         private void Button_Click(object sender, RoutedEventArgs e)
         {
-	    if (_skCenter == null)
+	    SK.OnReplyMessage += (strLoginID, strMessage) => // 註冊 OnReplyMessage 事件，當有新公告訊息時觸發
 	    {
-		_skCenter = new SKCenterLib();
-	    }
 
-	    if (_skQuote == null)
+	    };
+	    // 當連線狀態改變時觸發，顯示使用者登入狀態或錯誤訊息到 ListBox
+	    SK.OnConnection += (loginID, code) =>
 	    {
-		_skQuote = new SKQuoteLib();
-	    }
+		// 檢查是否在 UI 執行緒中，避免跨執行緒操作 UI
+		
+	    };
 
-	    if (_skCenter == null || _skQuote == null)
+	    var result = SK.Login("C121417277", "Zxc840918@0117", 0);
+	    Console.WriteLine($"登入結果: {result.Code}");
+
+	    // 取得使用者選擇的連線狀態（0=連線，1=斷線...）
+	    int nStatus = 0;
+
+	    // 取得目標伺服器類型（例如回報、行情...）
+	    int nTargetType =1;
+
+	    // 呼叫群益 API 控制伺服器連線狀態
+	    int resultINnt = SK.ManageServerConnection("C121417277", nStatus, nTargetType);
+
+
+	    SK.OnNotifyQuoteLONG += (nMarketNo, strStockNo) =>
 	    {
-		MessageBox.Show("找不到 SKCOMLib 元件，請確認已安裝群益 API 元件。", "初始化失敗", MessageBoxButton.OK, MessageBoxImage.Warning);
-		return;
-	    }
+		// 建立報價物件
+		SK.SKSTOCKLONG2 pSKStockLONG = new SK.SKSTOCKLONG2();
+		// 收回報價物件
+		pSKStockLONG = SK.SKQuoteLib_GetStockByStockNo(nMarketNo, strStockNo);
+		// 如果報價物件回傳正常，則將數值呈現至 UI
+		if (pSKStockLONG.nCode == 0)
+		{
 
-	    int nCode = InvokeComInt(_skCenter, "SKCenterLib_Login", new object[] { "C121417277", "Zxc840918@0117" });
-	    Console.WriteLine($"登入結果: {nCode}");
-	    _skQuote.OnNotifyQuote += OnNotifyQuote;
+		}
+	    };
 
-	    // 進入報價監控
-	    int connectCode = InvokeComInt(_skQuote, "SKQuoteLib_EnterMonitor", new object[0]);
-	    Console.WriteLine($"連線報價伺服器結果: {connectCode}");
+	    SK.OnNotifyQuoteLONG += (nMarketNo, strStockNo) =>
+	    {
+		// 建立報價物件
+		SK.SKSTOCKLONG2 pSKStockLONG = new SK.SKSTOCKLONG2();
+		// 收回報價物件
+		pSKStockLONG = SK.SKQuoteLib_GetStockByStockNo(nMarketNo, strStockNo);
+		// 如果報價物件回傳正常，則將數值呈現至 UI
+		if (pSKStockLONG.nCode == 0)
+		{
+		    
+		}
+	    };
 
-	    var requestArgs = new object[] { (short)0, "3596" };
-	    int requestCode = InvokeComInt(_skQuote, "SKQuoteLib_RequestStocks", requestArgs);
-	    Console.WriteLine($"訂閱商品結果: {requestCode}");
 
+	    int nCode = SK.SKQuoteLib_RequestStocks("3231");
 	}
 	static void OnNotifyQuote(short sMarketNo, short sStockIdx)
 	{
 	    SKSTOCKLONG pStock = new SKSTOCKLONG();
-	    _skQuote.SKQuoteLib_GetStockByIndexLONG(sMarketNo, sStockIdx, ref pStock);
+	    int quoteCode = _skQuote.SKQuoteLib_GetStockByIndexLONG(sMarketNo, sStockIdx, ref pStock);
+	    if (quoteCode != 0)
+	    {
+		Console.WriteLine($"[OnNotifyQuote] 取價失敗: {quoteCode}, Market={sMarketNo}, Idx={sStockIdx}");
+		return;
+	    }
 
 	    Console.WriteLine($"商品代號: {pStock.bstrStockNo}, 名稱: {pStock.bstrStockName}");
 	    Console.WriteLine($"成交價: {pStock.nClose}, 成交量: {pStock.nTQty}");

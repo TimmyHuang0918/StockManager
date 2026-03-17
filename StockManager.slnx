@@ -1,3 +1,9 @@
 <Solution>
-  <Project Path="StockManager/StockManager.csproj" Id="319403f8-b140-4a3c-97d9-98ba98a7aa45" />
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+  </Configurations>
+  <Project Path="StockManager/StockManager.csproj" Id="319403f8-b140-4a3c-97d9-98ba98a7aa45">
+    <Platform Solution="*|x64" Project="x64" />
+  </Project>
 </Solution>
