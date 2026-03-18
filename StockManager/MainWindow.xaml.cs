@@ -11,8 +11,10 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows;
@@ -80,6 +82,7 @@ namespace StockManager
 	private readonly HashSet<string> _skSubscribedTwStocks = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 	private DateTime _lastSkQuoteReceivedAt = DateTime.MinValue;
 	private DateTime _lastSkResubscribeAt = DateTime.MinValue;
+	private readonly string _capitalCredentialFile = System.IO.Path.Combine(AppConfig.UserConfigDir, "capital_login_credential.dat");
 
 	public MainWindow()
         {
@@ -2318,7 +2321,8 @@ namespace StockManager
         {
 	    string loginId;
 	    string password;
-	    if (!TryShowCapitalLoginDialog(out loginId, out password))
+	    bool rememberCredential;
+	    if (!TryShowCapitalLoginDialog(out loginId, out password, out rememberCredential))
 	    {
 		return;
 	    }
@@ -2348,6 +2352,14 @@ namespace StockManager
 
 	    statusText.Text = $"群益登入成功：{loginId}";
 	    MessageBox.Show($"登入成功！\nID: {loginId}", "群益登入", MessageBoxButton.OK, MessageBoxImage.Information);
+	    if (rememberCredential)
+	    {
+		SaveCapitalCredential(loginId, password);
+	    }
+	    else
+	    {
+		ClearCapitalCredential();
+	    }
 	    _isCapitalLoggedIn = true;
 	    int nStatus = 0;
 	    int nTargetType = 1;
@@ -2400,18 +2412,21 @@ namespace StockManager
 	    _isSkEventsRegistered = true;
 	}
 
-	private bool TryShowCapitalLoginDialog(out string loginId, out string password)
+	private bool TryShowCapitalLoginDialog(out string loginId, out string password, out bool rememberCredential)
 	{
 	    loginId = string.Empty;
 	    password = string.Empty;
+	    rememberCredential = false;
 	    var tempLoginId = string.Empty;
 	    var tempPassword = string.Empty;
+	    var tempRememberCredential = false;
+	    var savedCredential = LoadCapitalCredential();
 
 	    var dialog = new Window
 	    {
 		Title = "群益登入",
 		Width = 360,
-		Height = 270,
+		Height = 305,
 		WindowStartupLocation = WindowStartupLocation.CenterOwner,
 		ResizeMode = ResizeMode.NoResize,
 		Owner = this,
@@ -2419,6 +2434,7 @@ namespace StockManager
 	    };
 
 	    var root = new Grid { Margin = new Thickness(16) };
+	    root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 	    root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 	    root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 	    root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -2442,6 +2458,15 @@ namespace StockManager
 	    Grid.SetRow(txtPwd, 3);
 	    root.Children.Add(txtPwd);
 
+	    var chkRemember = new CheckBox
+	    {
+		Content = "記住帳號密碼",
+		Margin = new Thickness(0, 10, 0, 0),
+		IsChecked = savedCredential != null
+	    };
+	    Grid.SetRow(chkRemember, 4);
+	    root.Children.Add(chkRemember);
+
 	    var hint = new TextBlock
 	    {
 		Text = "請輸入群益帳號與密碼",
@@ -2449,7 +2474,7 @@ namespace StockManager
 		Foreground = (Brush)new BrushConverter().ConvertFromString("#607D8B"),
 		Margin = new Thickness(0, 10, 0, 0)
 	    };
-	    Grid.SetRow(hint, 4);
+	    Grid.SetRow(hint, 5);
 	    root.Children.Add(hint);
 
 	    var btnPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
@@ -2468,6 +2493,7 @@ namespace StockManager
 
 		tempLoginId = id;
 		tempPassword = pwd;
+		tempRememberCredential = chkRemember.IsChecked == true;
 		dialog.DialogResult = true;
 	    };
 
@@ -2475,20 +2501,153 @@ namespace StockManager
 
 	    btnPanel.Children.Add(btnOk);
 	    btnPanel.Children.Add(btnCancel);
-	    Grid.SetRow(btnPanel, 5);
+	    Grid.SetRow(btnPanel, 6);
 	    root.Children.Add(btnPanel);
 
 	    dialog.Content = root;
-	    dialog.Loaded += (s, e) => txtId.Focus();
+	    dialog.Loaded += (s, e) =>
+	    {
+		if (savedCredential != null)
+		{
+		    txtId.Text = savedCredential.Item1;
+		    txtPwd.Password = savedCredential.Item2;
+		}
+		txtId.Focus();
+	    };
 
 	    if (dialog.ShowDialog() == true)
 	    {
 		loginId = tempLoginId;
 		password = tempPassword;
+		rememberCredential = tempRememberCredential;
 		return true;
 	    }
 
 	    return false;
+	}
+
+	private Tuple<string, string> LoadCapitalCredential()
+	{
+	    try
+	    {
+		if (!File.Exists(_capitalCredentialFile))
+		{
+		    return null;
+		}
+
+		var protectedBytes = File.ReadAllBytes(_capitalCredentialFile);
+		var bytes = DecryptCapitalCredentialBytes(protectedBytes);
+		var json = Encoding.UTF8.GetString(bytes);
+		var serializer = new JavaScriptSerializer();
+		var data = serializer.Deserialize<Dictionary<string, string>>(json);
+		if (data == null)
+		{
+		    return null;
+		}
+
+		string id;
+		string pwd;
+		if (!data.TryGetValue("login_id", out id) || !data.TryGetValue("password", out pwd))
+		{
+		    return null;
+		}
+
+		if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(pwd))
+		{
+		    return null;
+		}
+
+		return Tuple.Create(id, pwd);
+	    }
+	    catch (Exception ex)
+	    {
+		Console.WriteLine($"[群益登入記憶讀取失敗] {ex.Message}");
+		return null;
+	    }
+	}
+
+	private void SaveCapitalCredential(string loginId, string password)
+	{
+	    try
+	    {
+		if (!Directory.Exists(AppConfig.UserConfigDir))
+		{
+		    Directory.CreateDirectory(AppConfig.UserConfigDir);
+		}
+
+		var serializer = new JavaScriptSerializer();
+		var payload = serializer.Serialize(new Dictionary<string, string>
+		{
+		    { "login_id", loginId ?? string.Empty },
+		    { "password", password ?? string.Empty }
+		});
+		var bytes = Encoding.UTF8.GetBytes(payload);
+		var protectedBytes = EncryptCapitalCredentialBytes(bytes);
+		File.WriteAllBytes(_capitalCredentialFile, protectedBytes);
+	    }
+	    catch (Exception ex)
+	    {
+		Console.WriteLine($"[群益登入記憶儲存失敗] {ex.Message}");
+	    }
+	}
+
+	private byte[] EncryptCapitalCredentialBytes(byte[] plain)
+	{
+	    var entropy = (Environment.UserName + "|" + Environment.MachineName + "|StockManager");
+	    var salt = Encoding.UTF8.GetBytes("StockManager-Capital-Credential-Salt");
+	    using (var derive = new Rfc2898DeriveBytes(entropy, salt, 1000))
+	    using (var aes = new AesManaged())
+	    {
+		aes.Key = derive.GetBytes(32);
+		aes.IV = derive.GetBytes(16);
+		aes.Mode = CipherMode.CBC;
+		aes.Padding = PaddingMode.PKCS7;
+
+		using (var ms = new MemoryStream())
+		using (var cs = new CryptoStream(ms, aes.CreateEncryptor(), CryptoStreamMode.Write))
+		{
+		    cs.Write(plain, 0, plain.Length);
+		    cs.FlushFinalBlock();
+		    return ms.ToArray();
+		}
+	    }
+	}
+
+	private byte[] DecryptCapitalCredentialBytes(byte[] cipher)
+	{
+	    var entropy = (Environment.UserName + "|" + Environment.MachineName + "|StockManager");
+	    var salt = Encoding.UTF8.GetBytes("StockManager-Capital-Credential-Salt");
+	    using (var derive = new Rfc2898DeriveBytes(entropy, salt, 1000))
+	    using (var aes = new AesManaged())
+	    {
+		aes.Key = derive.GetBytes(32);
+		aes.IV = derive.GetBytes(16);
+		aes.Mode = CipherMode.CBC;
+		aes.Padding = PaddingMode.PKCS7;
+
+		using (var input = new MemoryStream(cipher))
+		using (var cs = new CryptoStream(input, aes.CreateDecryptor(), CryptoStreamMode.Read))
+		using (var output = new MemoryStream())
+		{
+		    cs.CopyTo(output);
+		    return output.ToArray();
+		}
+	    }
+	}
+
+	private void ClearCapitalCredential()
+	{
+	    try
+	    {
+		if (File.Exists(_capitalCredentialFile))
+		{
+		    File.Delete(_capitalCredentialFile);
+		}
+	    }
+	    catch (Exception ex)
+	    {
+		Console.WriteLine($"[群益登入記憶清除失敗] {ex.Message}");
+	    }
 	}
 
 	private void SubscribeTwStocksFromSk(bool forceResubscribe = false)
@@ -2518,16 +2677,19 @@ namespace StockManager
 		var cancelCode = SK.SKQuoteLib_CancelRequestStocks(cancelArg);
 		Console.WriteLine($"[SK取消訂閱] {cancelArg} => {cancelCode}");
 
-		foreach (var stockNo in toCancel)
+		if (cancelCode == 0)
 		{
-		    _skSubscribedTwStocks.Remove(stockNo);
-
-		    var uiTicker = NormalizeTwTickerForUi(stockNo);
-		    lock (_skTwQuoteLock)
+		    foreach (var stockNo in toCancel)
 		    {
-			if (_twSkQuoteCache.ContainsKey(uiTicker))
+			_skSubscribedTwStocks.Remove(stockNo);
+
+			var uiTicker = NormalizeTwTickerForUi(stockNo);
+			lock (_skTwQuoteLock)
 			{
-			    _twSkQuoteCache.Remove(uiTicker);
+			    if (_twSkQuoteCache.ContainsKey(uiTicker))
+			    {
+				_twSkQuoteCache.Remove(uiTicker);
+			    }
 			}
 		    }
 		}
@@ -2540,6 +2702,7 @@ namespace StockManager
 	    if (toSubscribe.Count > 0)
 	    {
 		var subscribeArg = string.Join(",", toSubscribe);
+                Thread.Sleep(1000); // 加入短暫延遲，避免與取消訂閱的請求過於接近
 		var code = SK.SKQuoteLib_RequestStocks(subscribeArg);
 		Console.WriteLine($"[{(forceResubscribe ? "SK重送訂閱" : "SK訂閱")}] {subscribeArg} => {code}");
 		if (code == 0)
@@ -2692,60 +2855,6 @@ namespace StockManager
 		stock.ChangePercent = quote.Item3;
 		stock.Source = "SK.OnNotifyQuoteLONG";
 		stock.UpdatedAt = quote.Item4;
-	    }
-	}
-
-	private void ApplyTwYFinanceFallbackForMissingSk()
-	{
-	    var twPrices = _twPriceFetcher.GetPrices();
-	    var twPriceMeta = _twPriceFetcher.GetPriceMeta();
-	    var now = DateTime.Now;
-
-	    foreach (var stock in _twStockList)
-	    {
-		var isFreshSk = string.Equals(stock.Source, "SK.OnNotifyQuoteLONG", StringComparison.OrdinalIgnoreCase)
-		    && stock.UpdatedAt.HasValue
-		    && (now - stock.UpdatedAt.Value).TotalSeconds <= 25;
-
-		if (isFreshSk)
-		{
-		    continue;
-		}
-
-		Tuple<double?, double?> priceData;
-		if (!twPrices.TryGetValue(stock.Ticker, out priceData))
-		{
-		    continue;
-		}
-
-		stock.Price = priceData.Item1;
-		stock.ChangePercent = priceData.Item2;
-
-		Dictionary<string, object> meta;
-		double? previousClose = null;
-		if (twPriceMeta.TryGetValue(stock.Ticker, out meta) && meta != null)
-		{
-		    if (meta.ContainsKey("previous_close") && meta["previous_close"] != null)
-		    {
-			previousClose = meta["previous_close"] as double?;
-		    }
-
-		    var source = meta.ContainsKey("source") ? meta["source"]?.ToString() : null;
-		    stock.Source = string.IsNullOrWhiteSpace(source) ? "yfinance" : source;
-		    stock.UpdatedAt = meta.ContainsKey("updated_at") ? meta["updated_at"] as DateTime? : now;
-		}
-		else
-		{
-		    stock.Source = "yfinance";
-		    stock.UpdatedAt = now;
-		}
-
-		if (stock.Price.HasValue && previousClose.HasValue && Math.Abs(previousClose.Value) > 0.000001)
-		{
-		    stock.PreviousClose = previousClose;
-		    var change = stock.Price.Value - previousClose.Value;
-		    stock.ChangePercent = (change / previousClose.Value) * 100;
-		}
 	    }
 	}
     }
