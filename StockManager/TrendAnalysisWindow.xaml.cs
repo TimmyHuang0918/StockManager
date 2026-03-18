@@ -6,6 +6,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -40,8 +41,9 @@ namespace StockManager
                 private bool _isRealtimeKLineMode;
                 private bool _isRealtimeKLineRefreshing;
                 private double? _lastDisplayedPrice;
+                private readonly Func<string, Tuple<double?, double?, DateTime?>> _twSkQuoteProvider;
 
-                public TrendAnalysisWindow(string ticker, string stockName, PriceFetcherService priceFetcher)
+                public TrendAnalysisWindow(string ticker, string stockName, PriceFetcherService priceFetcher, Func<string, Tuple<double?, double?, DateTime?>> twSkQuoteProvider = null)
                 {
                         try
                         {
@@ -54,6 +56,7 @@ namespace StockManager
                                 _ticker = ticker;
                                 _stockName = stockName;
                                 _priceFetcher = priceFetcher;
+                                _twSkQuoteProvider = twSkQuoteProvider;
 
                                 Console.WriteLine($"[趨勢視窗] 設定參數完成");
 
@@ -139,7 +142,6 @@ namespace StockManager
                                 if (txtCurrentPrice != null) txtCurrentPrice.Text = "錯誤";
                         }
                 }
-
                 private void UpdateIntradayBarsControlVisibility()
                 {
                         var isIntraday = string.Equals(_currentPeriod, "5m", StringComparison.OrdinalIgnoreCase);
@@ -395,7 +397,36 @@ namespace StockManager
 
                 private bool IsTwTicker(string ticker)
                 {
-                        return !string.IsNullOrEmpty(ticker) && ticker.EndsWith(".TW", StringComparison.OrdinalIgnoreCase);
+                        if (string.IsNullOrWhiteSpace(ticker))
+                        {
+                                return false;
+                        }
+
+                        var normalized = ticker.Trim().ToUpperInvariant();
+                        return normalized.EndsWith(".TW", StringComparison.OrdinalIgnoreCase)
+                                || normalized.EndsWith(".TWO", StringComparison.OrdinalIgnoreCase)
+                                || Regex.IsMatch(normalized, "^\\d{4}[A-Z]?$");
+                }
+
+                private string NormalizeTwTickerForSkQuote(string ticker)
+                {
+                        if (string.IsNullOrWhiteSpace(ticker))
+                        {
+                                return null;
+                        }
+
+                        var normalized = ticker.Trim().ToUpperInvariant();
+                        if (normalized.EndsWith(".TWO", StringComparison.OrdinalIgnoreCase))
+                        {
+                                normalized = normalized.Substring(0, normalized.Length - 4);
+                        }
+
+                        if (!normalized.EndsWith(".TW", StringComparison.OrdinalIgnoreCase))
+                        {
+                                normalized += ".TW";
+                        }
+
+                        return normalized;
                 }
 
                 private class StockSwitcherItem
@@ -448,6 +479,7 @@ namespace StockManager
                                 var result = await Task.Run(() => _priceFetcher.GetRealtimePriceWithSource(_ticker));
                                 var currentPrice = result.Item1;
                                 var changePercent = result.Item2;
+                                var currentPriceSource = string.IsNullOrWhiteSpace(result.Item3) ? "unknown" : result.Item3;
                                 if (showLoading)
                                 {
                                         UpdateLoadingWindow(45, "取得即時價格...");
@@ -471,6 +503,21 @@ namespace StockManager
                                         }
                                 }
 
+                                // 台股且有群益即時回報時，優先使用 SK 即時價
+                                DateTime? skQuoteAt;
+                                double? skChangePercent;
+                                var skPrice = TryGetTwSkRealtimePrice(_ticker, out skChangePercent, out skQuoteAt);
+                                if (IsTwTicker(_ticker) && skPrice.HasValue)
+                                {
+                                        currentPrice = skPrice;
+                                        currentPriceSource = "SK.OnNotifyQuoteLONG";
+                                        if (skChangePercent.HasValue)
+                                        {
+                                                changePercent = skChangePercent;
+                                        }
+                                        Console.WriteLine($"[趨勢視窗] 使用 SK 即時價: {_ticker} Price={currentPrice:F2}, Change={changePercent?.ToString("F2") ?? "N/A"}%");
+                                }
+
                                 // 若即時價失敗，改用歷史資料最新收盤價回補，避免分析內容整體空白
                                 if (!currentPrice.HasValue)
                                 {
@@ -479,6 +526,7 @@ namespace StockManager
                                         if (fallbackPrice.HasValue)
                                         {
                                                 currentPrice = fallbackPrice;
+                                                currentPriceSource = "history-fallback";
                                                 if (!changePercent.HasValue && fallbackChangePercent.HasValue)
                                                 {
                                                         changePercent = fallbackChangePercent;
@@ -486,6 +534,8 @@ namespace StockManager
                                                 Console.WriteLine($"[趨勢視窗] 使用歷史資料回補價格: {currentPrice.Value:F2}");
                                         }
                                 }
+
+                                txtSubtitle.Text = $"資料更新時間: {DateTime.Now:yyyy-MM-dd HH:mm:ss} | 週期: {periodText}{(_isRealtimeKLineMode ? " | 即時K線" : string.Empty)} | 資料源: {currentPriceSource}";
 
                                 Console.WriteLine($"[趨勢視窗] txtChange 狀態: null={txtChange == null}");
 
@@ -782,6 +832,18 @@ namespace StockManager
                                 Console.WriteLine($"[趨勢視窗] 無法取得 {_ticker} 歷史資料，取消隨機資料回填。");
                         }
 
+                        // 台股即時K線：登入群益時，用 SK 最新報價覆蓋/補一根最新 K
+                        if (IsTwTicker(_ticker))
+                        {
+                                DateTime? quoteAt;
+                                double? quoteChange;
+                                var realtimePrice = TryGetTwSkRealtimePrice(_ticker, out quoteChange, out quoteAt);
+                                if (realtimePrice.HasValue)
+                                {
+                                        ApplyRealtimePriceToKLine(historicalData, realtimePrice.Value, quoteAt ?? DateTime.Now, historyInterval);
+                                }
+                        }
+
                         if (historicalData.Count == 0)
                         {
                                 return new AnalysisCalculationResult
@@ -875,6 +937,78 @@ namespace StockManager
                                 MACDAnalysis = macdAnalysis,
                                 HistogramColorHex = histColor
                         };
+                }
+
+                private double? TryGetTwSkRealtimePrice(string ticker, out double? changePercent, out DateTime? quoteAt)
+                {
+                        changePercent = null;
+                        quoteAt = null;
+
+                        if (_twSkQuoteProvider == null || string.IsNullOrWhiteSpace(ticker) || !IsTwTicker(ticker))
+                        {
+                                return null;
+                        }
+
+                        try
+                        {
+                                var normalizedTicker = NormalizeTwTickerForSkQuote(ticker);
+                                var quote = _twSkQuoteProvider(normalizedTicker);
+                                if (quote == null)
+                                {
+                                        return null;
+                                }
+
+                                changePercent = quote.Item2;
+                                quoteAt = quote.Item3;
+                                return quote.Item1;
+                        }
+                        catch (Exception ex)
+                        {
+                                Console.WriteLine($"[趨勢視窗] 讀取 SK 即時價失敗: {ex.Message}");
+                                return null;
+                        }
+                }
+
+                private void ApplyRealtimePriceToKLine(List<CandlestickData> data, double realtimePrice, DateTime quoteTime, string interval)
+                {
+                        if (data == null || data.Count == 0)
+                        {
+                                return;
+                        }
+
+                        if (!string.Equals(interval, "5m", StringComparison.OrdinalIgnoreCase))
+                        {
+                                var lastDaily = data[data.Count - 1];
+                                lastDaily.Close = realtimePrice;
+                                lastDaily.High = Math.Max(lastDaily.High, realtimePrice);
+                                lastDaily.Low = Math.Min(lastDaily.Low, realtimePrice);
+                                return;
+                        }
+
+                        var barTime = new DateTime(quoteTime.Year, quoteTime.Month, quoteTime.Day, quoteTime.Hour, (quoteTime.Minute / 5) * 5, 0);
+                        var barKey = barTime.ToString("MM/dd HH:mm");
+                        var last = data[data.Count - 1];
+
+                        if (string.Equals(last.Date, barKey, StringComparison.OrdinalIgnoreCase))
+                        {
+                                last.Close = realtimePrice;
+                                last.High = Math.Max(last.High, realtimePrice);
+                                last.Low = Math.Min(last.Low, realtimePrice);
+                                return;
+                        }
+
+                        var open = last.Close;
+                        data.Add(new CandlestickData
+                        {
+                                Date = barKey,
+                                Open = open,
+                                High = Math.Max(open, realtimePrice),
+                                Low = Math.Min(open, realtimePrice),
+                                Close = realtimePrice,
+                                Volume = 0,
+                                ChangeAmount = realtimePrice - open,
+                                ChangePercent = Math.Abs(open) > 0.000001 ? (realtimePrice - open) / open * 100 : 0
+                        });
                 }
 
                 private double? TryGetFallbackPriceFromHistory(out double? fallbackChangePercent)

@@ -73,6 +73,13 @@ namespace StockManager
 
 	private static SKCenterLib _skCenter;
 	private static SKQuoteLib _skQuote;
+	private bool _isSkEventsRegistered;
+	private bool _isCapitalLoggedIn;
+	private readonly object _skTwQuoteLock = new object();
+	private Dictionary<string, Tuple<double?, double?, double?, DateTime>> _twSkQuoteCache = new Dictionary<string, Tuple<double?, double?, double?, DateTime>>(StringComparer.OrdinalIgnoreCase);
+	private readonly HashSet<string> _skSubscribedTwStocks = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+	private DateTime _lastSkQuoteReceivedAt = DateTime.MinValue;
+	private DateTime _lastSkResubscribeAt = DateTime.MinValue;
 
 	public MainWindow()
         {
@@ -372,6 +379,11 @@ namespace StockManager
                 _twStockList.Add(new StockInfo(stock.Key, stock.Value));
             }
             ApplyFilter("TW");
+
+	    if (_isCapitalLoggedIn)
+	    {
+		SubscribeTwStocksFromSk();
+	    }
         }
 
         private void LoadHoldings()
@@ -904,53 +916,61 @@ namespace StockManager
                 }
             }
 
-            // 更新台股價格顯示
-            var twPrices = _twPriceFetcher.GetPrices();
-            var twPriceMeta = _twPriceFetcher.GetPriceMeta();
-
-            Console.WriteLine($"台股數據: {twPrices.Count} 筆");
-
-            foreach (var stock in _twStockList)
+            if (_isCapitalLoggedIn)
             {
-                if (twPrices.ContainsKey(stock.Ticker))
-                {
-                    var priceData = twPrices[stock.Ticker];
-                    stock.Price = priceData.Item1;
-                    stock.ChangePercent = priceData.Item2;
+                EnsureSkSubscriptionAlive();
+                ApplySkTwQuotesToStockList();
+            }
+            else
+            {
+                // 更新台股價格顯示（未登入群益時使用 yfinance）
+                var twPrices = _twPriceFetcher.GetPrices();
+                var twPriceMeta = _twPriceFetcher.GetPriceMeta();
 
-                    // 從 Meta 獲取前收盤價（台股）
+                Console.WriteLine($"台股數據: {twPrices.Count} 筆");
+
+                foreach (var stock in _twStockList)
+                {
+                    if (twPrices.ContainsKey(stock.Ticker))
+                    {
+                        var priceData = twPrices[stock.Ticker];
+                        stock.Price = priceData.Item1;
+                        stock.ChangePercent = priceData.Item2;
+
+                        // 從 Meta 獲取前收盤價（台股）
+                        if (twPriceMeta.ContainsKey(stock.Ticker))
+                        {
+                            var meta = twPriceMeta[stock.Ticker];
+
+                            double? previousClose = null;
+                            if (meta.ContainsKey("previous_close") && meta["previous_close"] != null)
+                            {
+                                previousClose = meta["previous_close"] as double?;
+                            }
+
+                            // 設置前收盤價到 UI
+                            stock.PreviousClose = previousClose;
+
+                            // 優先用前收盤價自行計算漲跌幅
+                            if (stock.Price.HasValue && previousClose.HasValue && previousClose.Value != 0)
+                            {
+                                var change = stock.Price.Value - previousClose.Value;
+                                stock.ChangePercent = (change / previousClose.Value) * 100;
+                            }
+                        }
+
+                        // 詳細診斷日誌
+                        var priceStr = priceData.Item1?.ToString("F2") ?? "null";
+                        var changeStr = stock.ChangePercent?.ToString("F2") ?? "null";
+                        var hasChange = stock.ChangePercent.HasValue ? "✅" : "❌";
+                        Console.WriteLine($"  {stock.Ticker}: Price={priceStr}, Change={changeStr}% {hasChange}");
+                    }
                     if (twPriceMeta.ContainsKey(stock.Ticker))
                     {
                         var meta = twPriceMeta[stock.Ticker];
-
-                        double? previousClose = null;
-                        if (meta.ContainsKey("previous_close") && meta["previous_close"] != null)
-                        {
-                            previousClose = meta["previous_close"] as double?;
-                        }
-
-                        // 設置前收盤價到 UI
-                        stock.PreviousClose = previousClose;
-
-                        // 優先用前收盤價自行計算漲跌幅
-                        if (stock.Price.HasValue && previousClose.HasValue && previousClose.Value != 0)
-                        {
-                            var change = stock.Price.Value - previousClose.Value;
-                            stock.ChangePercent = (change / previousClose.Value) * 100;
-                        }
+                        stock.Source = meta.ContainsKey("source") ? meta["source"]?.ToString() : "N/A";
+                        stock.UpdatedAt = meta.ContainsKey("updated_at") ? meta["updated_at"] as DateTime? : null;
                     }
-
-                    // 詳細診斷日誌
-                    var priceStr = priceData.Item1?.ToString("F2") ?? "null";
-                    var changeStr = stock.ChangePercent?.ToString("F2") ?? "null";
-                    var hasChange = stock.ChangePercent.HasValue ? "✅" : "❌";
-                    Console.WriteLine($"  {stock.Ticker}: Price={priceStr}, Change={changeStr}% {hasChange}");
-                }
-                if (twPriceMeta.ContainsKey(stock.Ticker))
-                {
-                    var meta = twPriceMeta[stock.Ticker];
-                    stock.Source = meta.ContainsKey("source") ? meta["source"]?.ToString() : "N/A";
-                    stock.UpdatedAt = meta.ContainsKey("updated_at") ? meta["updated_at"] as DateTime? : null;
                 }
             }
 
@@ -2172,7 +2192,8 @@ namespace StockManager
                         var trendWindow = new TrendAnalysisWindow(
                                 selectedStock.Ticker,
                                 selectedStock.Name,
-                                priceFetcher
+                                priceFetcher,
+                                TryGetLatestTwSkQuote
                         );
                         trendWindow.Owner = this;
                         Console.WriteLine($"[雙擊] 準備顯示趨勢視窗");
@@ -2191,6 +2212,7 @@ namespace StockManager
                         );
                     }
                 }
+
                 else
                 {
                     Console.WriteLine("[雙擊] 未選中任何股票或選中項目不是 StockInfo");
@@ -2209,6 +2231,36 @@ namespace StockManager
                 );
             }
         }
+
+	private Tuple<double?, double?, DateTime?> TryGetLatestTwSkQuote(string ticker)
+	{
+	    if (!_isCapitalLoggedIn)
+	    {
+		return null;
+	    }
+
+	    var key = NormalizeTwTickerForUi(ticker);
+	    if (string.IsNullOrWhiteSpace(key))
+	    {
+		return null;
+	    }
+
+	    lock (_skTwQuoteLock)
+	    {
+		Tuple<double?, double?, double?, DateTime> quote;
+		if (!_twSkQuoteCache.TryGetValue(key, out quote))
+		{
+		    return null;
+		}
+
+		return Tuple.Create(quote.Item1, quote.Item3, (DateTime?)quote.Item4);
+	    }
+	}
+
+	public Tuple<double?, double?, DateTime?> GetLatestTwSkQuoteForTrend(string ticker)
+	{
+	    return TryGetLatestTwSkQuote(ticker);
+	}
 
         private void BtnDebug_Click(object sender, RoutedEventArgs e)
         {
@@ -2264,74 +2316,438 @@ namespace StockManager
 
         private void Button_Click(object sender, RoutedEventArgs e)
         {
-	    SK.OnReplyMessage += (strLoginID, strMessage) => // 註冊 OnReplyMessage 事件，當有新公告訊息時觸發
+	    string loginId;
+	    string password;
+	    if (!TryShowCapitalLoginDialog(out loginId, out password))
 	    {
-
-	    };
-	    // 當連線狀態改變時觸發，顯示使用者登入狀態或錯誤訊息到 ListBox
-	    SK.OnConnection += (loginID, code) =>
-	    {
-		// 檢查是否在 UI 執行緒中，避免跨執行緒操作 UI
-		
-	    };
-
-	    var result = SK.Login("C121417277", "Zxc840918@0117", 0);
-	    Console.WriteLine($"登入結果: {result.Code}");
-
-	    // 取得使用者選擇的連線狀態（0=連線，1=斷線...）
-	    int nStatus = 0;
-
-	    // 取得目標伺服器類型（例如回報、行情...）
-	    int nTargetType =1;
-
-	    // 呼叫群益 API 控制伺服器連線狀態
-	    int resultINnt = SK.ManageServerConnection("C121417277", nStatus, nTargetType);
-
-
-	    SK.OnNotifyQuoteLONG += (nMarketNo, strStockNo) =>
-	    {
-		// 建立報價物件
-		SK.SKSTOCKLONG2 pSKStockLONG = new SK.SKSTOCKLONG2();
-		// 收回報價物件
-		pSKStockLONG = SK.SKQuoteLib_GetStockByStockNo(nMarketNo, strStockNo);
-		// 如果報價物件回傳正常，則將數值呈現至 UI
-		if (pSKStockLONG.nCode == 0)
-		{
-
-		}
-	    };
-
-	    SK.OnNotifyQuoteLONG += (nMarketNo, strStockNo) =>
-	    {
-		// 建立報價物件
-		SK.SKSTOCKLONG2 pSKStockLONG = new SK.SKSTOCKLONG2();
-		// 收回報價物件
-		pSKStockLONG = SK.SKQuoteLib_GetStockByStockNo(nMarketNo, strStockNo);
-		// 如果報價物件回傳正常，則將數值呈現至 UI
-		if (pSKStockLONG.nCode == 0)
-		{
-		    
-		}
-	    };
-
-
-	    int nCode = SK.SKQuoteLib_RequestStocks("3231");
-	}
-	static void OnNotifyQuote(short sMarketNo, short sStockIdx)
-	{
-	    SKSTOCKLONG pStock = new SKSTOCKLONG();
-	    int quoteCode = _skQuote.SKQuoteLib_GetStockByIndexLONG(sMarketNo, sStockIdx, ref pStock);
-	    if (quoteCode != 0)
-	    {
-		Console.WriteLine($"[OnNotifyQuote] 取價失敗: {quoteCode}, Market={sMarketNo}, Idx={sStockIdx}");
 		return;
 	    }
 
-	    Console.WriteLine($"商品代號: {pStock.bstrStockNo}, 名稱: {pStock.bstrStockName}");
-	    Console.WriteLine($"成交價: {pStock.nClose}, 成交量: {pStock.nTQty}");
+	    RegisterSkEventsIfNeeded();
+
+	    var result = SK.Login(loginId, password, 0);
+	    Console.WriteLine($"登入結果: {result.Code}");
+	    if (result.Code != 0)
+	    {
+		MessageBox.Show($"登入失敗，代碼: {result.Code}", "群益登入", MessageBoxButton.OK, MessageBoxImage.Warning);
+		return;
+	    }
+
+	    var loginButton = sender as Button ?? FindName("btnTwCapitalLogin") as Button;
+	    if (loginButton != null)
+	    {
+		loginButton.Visibility = Visibility.Collapsed;
+	    }
+
+	    var loginInfoText = FindName("txtTwCapitalLoginInfo") as TextBlock;
+	    if (loginInfoText != null)
+	    {
+		loginInfoText.Text = $"群益帳號: {loginId}";
+		loginInfoText.Visibility = Visibility.Visible;
+	    }
+
+	    statusText.Text = $"群益登入成功：{loginId}";
+	    MessageBox.Show($"登入成功！\nID: {loginId}", "群益登入", MessageBoxButton.OK, MessageBoxImage.Information);
+	    _isCapitalLoggedIn = true;
+	    int nStatus = 0;
+	    int nTargetType = 1;
+	    int resultINnt = SK.ManageServerConnection(loginId, nStatus, nTargetType);
+	    Console.WriteLine($"ManageServerConnection: {resultINnt}");
+	    SubscribeTwStocksFromSk();
 	}
 
+	private void RegisterSkEventsIfNeeded()
+	{
+	    if (_isSkEventsRegistered)
+	    {
+		return;
+	    }
 
+	    SK.OnReplyMessage += (strLoginID, strMessage) =>
+	    {
+		Console.WriteLine($"[OnReplyMessage] {strLoginID}: {strMessage}");
+	    };
+
+	    SK.OnConnection += (loginID, code) =>
+	    {
+		Console.WriteLine($"[OnConnection] {loginID}, Code={code}");
+	    };
+
+	    SK.OnNotifyQuoteLONG += (nMarketNo, strStockNo) =>
+	    {
+		var pSKStockLONG = SK.SKQuoteLib_GetStockByStockNo(nMarketNo, strStockNo);
+		if (pSKStockLONG.nCode == 0)
+		{
+		    var ticker = NormalizeTwTickerForUi(strStockNo);
+		    var close = TryGetScaledSkPrice(pSKStockLONG, pSKStockLONG.nClose);
+		    var prevClose = TryGetScaledSkPrice(pSKStockLONG, (int)(TryGetSkNumericField(pSKStockLONG, "nRef") ?? 0));
+		    double? changePercent = null;
+		    if (close.HasValue && prevClose.HasValue && Math.Abs(prevClose.Value) > 0.000001)
+		    {
+			changePercent = (close.Value - prevClose.Value) / prevClose.Value * 100;
+		    }
+
+		    lock (_skTwQuoteLock)
+		    {
+			_twSkQuoteCache[ticker] = Tuple.Create(close, prevClose, changePercent, DateTime.Now);
+			_lastSkQuoteReceivedAt = DateTime.Now;
+		    }
+
+		    Console.WriteLine($"[SK即時] {ticker} 成交={close?.ToString("F2") ?? "N/A"} 漲跌={changePercent?.ToString("F2") ?? "N/A"}%");
+		}
+	    };
+
+	    _isSkEventsRegistered = true;
+	}
+
+	private bool TryShowCapitalLoginDialog(out string loginId, out string password)
+	{
+	    loginId = string.Empty;
+	    password = string.Empty;
+	    var tempLoginId = string.Empty;
+	    var tempPassword = string.Empty;
+
+	    var dialog = new Window
+	    {
+		Title = "群益登入",
+		Width = 360,
+		Height = 270,
+		WindowStartupLocation = WindowStartupLocation.CenterOwner,
+		ResizeMode = ResizeMode.NoResize,
+		Owner = this,
+		Background = (Brush)new BrushConverter().ConvertFromString("#F5F7FA")
+	    };
+
+	    var root = new Grid { Margin = new Thickness(16) };
+	    root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+	    root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+	    root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+	    root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+	    root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+	    root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+	    var lblId = new TextBlock { Text = "帳號", FontWeight = FontWeights.Bold, Foreground = (Brush)new BrushConverter().ConvertFromString("#2C3E50") };
+	    Grid.SetRow(lblId, 0);
+	    root.Children.Add(lblId);
+
+	    var txtId = new TextBox { Height = 30, Margin = new Thickness(0, 6, 0, 0), VerticalContentAlignment = VerticalAlignment.Center };
+	    Grid.SetRow(txtId, 1);
+	    root.Children.Add(txtId);
+
+	    var lblPwd = new TextBlock { Text = "密碼", FontWeight = FontWeights.Bold, Margin = new Thickness(0, 10, 0, 0), Foreground = (Brush)new BrushConverter().ConvertFromString("#2C3E50") };
+	    Grid.SetRow(lblPwd, 2);
+	    root.Children.Add(lblPwd);
+
+	    var txtPwd = new PasswordBox { Height = 30, Margin = new Thickness(0, 6, 0, 0) };
+	    Grid.SetRow(txtPwd, 3);
+	    root.Children.Add(txtPwd);
+
+	    var hint = new TextBlock
+	    {
+		Text = "請輸入群益帳號與密碼",
+		FontSize = 11,
+		Foreground = (Brush)new BrushConverter().ConvertFromString("#607D8B"),
+		Margin = new Thickness(0, 10, 0, 0)
+	    };
+	    Grid.SetRow(hint, 4);
+	    root.Children.Add(hint);
+
+	    var btnPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+	    var btnOk = new Button { Content = "登入", Width = 80, Height = 30, Margin = new Thickness(0, 0, 8, 0), Background = (Brush)new BrushConverter().ConvertFromString("#27AE60"), Foreground = Brushes.White, BorderThickness = new Thickness(0), IsDefault = true };
+	    var btnCancel = new Button { Content = "取消", Width = 80, Height = 30, Background = (Brush)new BrushConverter().ConvertFromString("#95A5A6"), Foreground = Brushes.White, BorderThickness = new Thickness(0), IsCancel = true };
+
+	    btnOk.Click += (s, e) =>
+	    {
+		var id = (txtId.Text ?? string.Empty).Trim();
+		var pwd = txtPwd.Password ?? string.Empty;
+		if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(pwd))
+		{
+		    MessageBox.Show("請輸入帳號與密碼", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+		    return;
+		}
+
+		tempLoginId = id;
+		tempPassword = pwd;
+		dialog.DialogResult = true;
+	    };
+
+	    btnCancel.Click += (s, e) => dialog.DialogResult = false;
+
+	    btnPanel.Children.Add(btnOk);
+	    btnPanel.Children.Add(btnCancel);
+	    Grid.SetRow(btnPanel, 5);
+	    root.Children.Add(btnPanel);
+
+	    dialog.Content = root;
+	    dialog.Loaded += (s, e) => txtId.Focus();
+
+	    if (dialog.ShowDialog() == true)
+	    {
+		loginId = tempLoginId;
+		password = tempPassword;
+		return true;
+	    }
+
+	    return false;
+	}
+
+	private void SubscribeTwStocksFromSk(bool forceResubscribe = false)
+	{
+	    if (!_isCapitalLoggedIn || _twStockList == null)
+	    {
+		return;
+	    }
+
+	    var targetStocks = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+	    foreach (var stock in _twStockList)
+	    {
+		var stockNo = NormalizeTwTickerForSkRequest(stock.Ticker);
+		if (!string.IsNullOrWhiteSpace(stockNo))
+		{
+		    targetStocks.Add(stockNo);
+		}
+	    }
+
+	    var toCancel = _skSubscribedTwStocks
+		.Where(x => !targetStocks.Contains(x))
+		.ToList();
+
+	    if (toCancel.Count > 0)
+	    {
+		var cancelArg = string.Join(",", toCancel);
+		var cancelCode = SK.SKQuoteLib_CancelRequestStocks(cancelArg);
+		Console.WriteLine($"[SK取消訂閱] {cancelArg} => {cancelCode}");
+
+		foreach (var stockNo in toCancel)
+		{
+		    _skSubscribedTwStocks.Remove(stockNo);
+
+		    var uiTicker = NormalizeTwTickerForUi(stockNo);
+		    lock (_skTwQuoteLock)
+		    {
+			if (_twSkQuoteCache.ContainsKey(uiTicker))
+			{
+			    _twSkQuoteCache.Remove(uiTicker);
+			}
+		    }
+		}
+	    }
+
+	    var toSubscribe = forceResubscribe
+		? targetStocks.ToList()
+		: targetStocks.Where(x => !_skSubscribedTwStocks.Contains(x)).ToList();
+
+	    if (toSubscribe.Count > 0)
+	    {
+		var subscribeArg = string.Join(",", toSubscribe);
+		var code = SK.SKQuoteLib_RequestStocks(subscribeArg);
+		Console.WriteLine($"[{(forceResubscribe ? "SK重送訂閱" : "SK訂閱")}] {subscribeArg} => {code}");
+		if (code == 0)
+		{
+		    foreach (var stockNo in toSubscribe)
+		    {
+			_skSubscribedTwStocks.Add(stockNo);
+		    }
+		}
+	    }
+	}
+
+	private void EnsureSkSubscriptionAlive()
+	{
+	    if (!_isCapitalLoggedIn || _skSubscribedTwStocks.Count == 0)
+	    {
+		return;
+	    }
+
+	    DateTime lastQuoteAt;
+	    lock (_skTwQuoteLock)
+	    {
+		lastQuoteAt = _lastSkQuoteReceivedAt;
+	    }
+
+	    var now = DateTime.Now;
+	    var noQuoteSeconds = lastQuoteAt == DateTime.MinValue
+		? double.MaxValue
+		: (now - lastQuoteAt).TotalSeconds;
+
+	    if (noQuoteSeconds < 45)
+	    {
+		return;
+	    }
+
+	    if ((now - _lastSkResubscribeAt).TotalSeconds < 60)
+	    {
+		return;
+	    }
+
+	    _lastSkResubscribeAt = now;
+	    Console.WriteLine($"[SK監控] 已 {noQuoteSeconds:F0} 秒未收到即時事件，重送訂閱...");
+	    SubscribeTwStocksFromSk(true);
+	}
+
+	private string NormalizeTwTickerForSkRequest(string ticker)
+	{
+	    var t = (ticker ?? string.Empty).Trim().ToUpperInvariant();
+	    if (t.EndsWith(".TWO", StringComparison.OrdinalIgnoreCase))
+	    {
+		t = t.Substring(0, t.Length - 4);
+	    }
+	    if (t.EndsWith(".TW", StringComparison.OrdinalIgnoreCase))
+	    {
+		t = t.Substring(0, t.Length - 3);
+	    }
+	    return t;
+	}
+
+	private string NormalizeTwTickerForUi(string stockNo)
+	{
+	    var t = (stockNo ?? string.Empty).Trim().ToUpperInvariant();
+	    if (string.IsNullOrWhiteSpace(t))
+	    {
+		return t;
+	    }
+
+	    if (t.EndsWith(".TWO", StringComparison.OrdinalIgnoreCase))
+	    {
+		t = t.Substring(0, t.Length - 4);
+	    }
+
+	    return t.EndsWith(".TW", StringComparison.OrdinalIgnoreCase) ? t : (t + ".TW");
+	}
+
+	private double? TryGetScaledSkPrice(object skStock, int rawPrice)
+	{
+	    if (rawPrice <= 0)
+	    {
+		return null;
+	    }
+
+	    try
+	    {
+		double decimals = TryGetSkNumericField(skStock, "sDecimal") ?? TryGetSkNumericField(skStock, "nDecimal") ?? 0;
+		if (decimals > 0 && decimals <= 6)
+		{
+		    return rawPrice / Math.Pow(10, decimals);
+		}
+	    }
+	    catch
+	    {
+	    }
+
+	    if (rawPrice > 10000)
+	    {
+		return rawPrice / 100.0;
+	    }
+
+	    return rawPrice;
+	}
+
+	private double? TryGetSkNumericField(object target, string fieldName)
+	{
+	    if (target == null || string.IsNullOrWhiteSpace(fieldName))
+	    {
+		return null;
+	    }
+
+	    try
+	    {
+		var type = target.GetType();
+		var field = type.GetField(fieldName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+		if (field != null)
+		{
+		    var value = field.GetValue(target);
+		    if (value != null)
+		    {
+			return Convert.ToDouble(value);
+		    }
+		}
+	    }
+	    catch
+	    {
+	    }
+
+	    return null;
+	}
+
+	private void ApplySkTwQuotesToStockList()
+	{
+	    Dictionary<string, Tuple<double?, double?, double?, DateTime>> snapshot;
+	    lock (_skTwQuoteLock)
+	    {
+		snapshot = new Dictionary<string, Tuple<double?, double?, double?, DateTime>>(_twSkQuoteCache, StringComparer.OrdinalIgnoreCase);
+	    }
+
+	    Console.WriteLine($"台股數據(SK): {snapshot.Count} 筆");
+	    foreach (var stock in _twStockList)
+	    {
+		Tuple<double?, double?, double?, DateTime> quote;
+		var quoteKey = NormalizeTwTickerForUi(stock.Ticker);
+		if (!snapshot.TryGetValue(quoteKey, out quote))
+		{
+		    continue;
+		}
+
+		stock.Price = quote.Item1;
+		stock.PreviousClose = quote.Item2;
+		stock.ChangePercent = quote.Item3;
+		stock.Source = "SK.OnNotifyQuoteLONG";
+		stock.UpdatedAt = quote.Item4;
+	    }
+	}
+
+	private void ApplyTwYFinanceFallbackForMissingSk()
+	{
+	    var twPrices = _twPriceFetcher.GetPrices();
+	    var twPriceMeta = _twPriceFetcher.GetPriceMeta();
+	    var now = DateTime.Now;
+
+	    foreach (var stock in _twStockList)
+	    {
+		var isFreshSk = string.Equals(stock.Source, "SK.OnNotifyQuoteLONG", StringComparison.OrdinalIgnoreCase)
+		    && stock.UpdatedAt.HasValue
+		    && (now - stock.UpdatedAt.Value).TotalSeconds <= 25;
+
+		if (isFreshSk)
+		{
+		    continue;
+		}
+
+		Tuple<double?, double?> priceData;
+		if (!twPrices.TryGetValue(stock.Ticker, out priceData))
+		{
+		    continue;
+		}
+
+		stock.Price = priceData.Item1;
+		stock.ChangePercent = priceData.Item2;
+
+		Dictionary<string, object> meta;
+		double? previousClose = null;
+		if (twPriceMeta.TryGetValue(stock.Ticker, out meta) && meta != null)
+		{
+		    if (meta.ContainsKey("previous_close") && meta["previous_close"] != null)
+		    {
+			previousClose = meta["previous_close"] as double?;
+		    }
+
+		    var source = meta.ContainsKey("source") ? meta["source"]?.ToString() : null;
+		    stock.Source = string.IsNullOrWhiteSpace(source) ? "yfinance" : source;
+		    stock.UpdatedAt = meta.ContainsKey("updated_at") ? meta["updated_at"] as DateTime? : now;
+		}
+		else
+		{
+		    stock.Source = "yfinance";
+		    stock.UpdatedAt = now;
+		}
+
+		if (stock.Price.HasValue && previousClose.HasValue && Math.Abs(previousClose.Value) > 0.000001)
+		{
+		    stock.PreviousClose = previousClose;
+		    var change = stock.Price.Value - previousClose.Value;
+		    stock.ChangePercent = (change / previousClose.Value) * 100;
+		}
+	    }
+	}
     }
 
     public class HoldingInfo : System.ComponentModel.INotifyPropertyChanged

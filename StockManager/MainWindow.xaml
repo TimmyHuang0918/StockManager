@@ -198,7 +198,6 @@
                         Click="BtnAddHoldingUser_Click" Background="#546E7A" Foreground="White" FontWeight="Bold" BorderThickness="0" Cursor="Hand"/>
                 <Button x:Name="btnDeleteHoldingUser" Content="刪除使用者" Width="96" Height="30" Margin="8,0,0,0" Style="{StaticResource  RoundedButton}"
                         Click="BtnDeleteHoldingUser_Click" Background="#546E7A" Foreground="White" FontWeight="Bold" BorderThickness="0" Cursor="Hand"/>
-                <Button Content="TestCode" Click="Button_Click"/>
             </StackPanel>
         </Border>
 
@@ -385,6 +384,11 @@
                             <TextBlock x:Name="txtTwSectorCacheEta" Text="預估剩餘 --:--" Margin="8,0,0,0"
                                         Foreground="#607D8B" Visibility="Collapsed"
                                         VerticalAlignment="Center"/>
+                            <Button x:Name="btnTwCapitalLogin" Content="群益登入" Width="90" Height="25" Margin="12,0,0,0"
+                                    Click="Button_Click" Background="#1565C0" Foreground="White"
+                                    FontWeight="Bold" BorderThickness="0" Cursor="Hand"/>
+                            <TextBlock x:Name="txtTwCapitalLoginInfo" Visibility="Collapsed" Margin="12,0,0,0"
+                                       VerticalAlignment="Center" Foreground="#7CC7FF" FontWeight="Bold"/>
                         </StackPanel>
                     </Border>
 
