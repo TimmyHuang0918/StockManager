@@ -1423,7 +1423,7 @@ namespace StockManager
                                         Color.FromRgb(103, 58, 183), 1.5); // 紫色 MA20
 
                                 // 回測目前預測方式，並在 K 線上標記買賣點
-                                var signals = BuildBacktestSignals(displayData);
+                                var signals = TradingRecommendationLibrary.BuildBacktestSignals(displayData);
                                 DrawBacktestSignals(chartCanvas, displayData, signals, chartLeft, chartTop, chartBottom, candleSpacing, candleWidth, minPrice, priceRange);
 
                                 // 添加價格標籤
@@ -2050,61 +2050,6 @@ namespace StockManager
                         {
                                 canvas.Children.Add(segment);
                         }
-                }
-
-                private List<Tuple<int, string, string>> BuildBacktestSignals(List<CandlestickData> data)
-                {
-                        var signals = new List<Tuple<int, string, string>>();
-                        if (data == null || data.Count < 30)
-                        {
-                                return signals;
-                        }
-
-                        var lastSignal = string.Empty;
-
-                        for (int i = 20; i < data.Count; i++)
-                        {
-                                var slice = data.Take(i + 1).ToList();
-                                var closes = slice.Select(x => x.Close).ToList();
-                                var current = slice.Last();
-
-                                var ma5 = CalculateMA(closes, 5);
-                                var ma20 = CalculateMA(closes, 20);
-                                var rsi = CalculateRSI(closes, 14);
-                                var macd = BuildMACDComponents(closes);
-                                var macdNow = macd.Item1.Last();
-                                var signalNow = macd.Item2.Last();
-                                var avgVol20 = slice.Skip(Math.Max(0, slice.Count - 20)).Average(x => (double)x.Volume);
-                                var volRatio = avgVol20 > 0 ? current.Volume / avgVol20 : 1.0;
-
-                                var buy = macdNow > signalNow && current.Close > ma5 && ma5 > ma20 && rsi < 70;
-                                var sell = macdNow < signalNow && current.Close < ma5 && ma5 < ma20 && rsi > 30;
-
-                                var strengthScore = 0;
-                                strengthScore += macdNow > signalNow ? 1 : -1;
-                                strengthScore += ma5 > ma20 ? 1 : -1;
-                                if (rsi >= 40 && rsi <= 60) strengthScore += 1;
-                                if (volRatio >= 1.2) strengthScore += 1;
-
-                                if (buy && lastSignal != "BUY")
-                                {
-                                        var action = strengthScore >= 3 ? "STRONG_BUY" : "BUY";
-                                        var levelText = action == "STRONG_BUY" ? "強買" : "買入";
-                                        var reason = $"{levelText}｜MACD多頭 + MA5>MA20 + RSI={rsi:F1} + 量比{volRatio:F2}";
-                                        signals.Add(Tuple.Create(i, action, reason));
-                                        lastSignal = "BUY";
-                                }
-                                else if (sell && lastSignal != "SELL")
-                                {
-                                        var action = strengthScore <= -3 ? "STRONG_SELL" : "SELL";
-                                        var levelText = action == "STRONG_SELL" ? "強賣" : "賣出";
-                                        var reason = $"{levelText}｜MACD空頭 + MA5<MA20 + RSI={rsi:F1} + 量比{volRatio:F2}";
-                                        signals.Add(Tuple.Create(i, action, reason));
-                                        lastSignal = "SELL";
-                                }
-                        }
-
-                        return signals;
                 }
 
                 private void DrawBacktestSignals(Canvas canvas, List<CandlestickData> data, List<Tuple<int, string, string>> signals,
