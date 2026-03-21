@@ -50,20 +50,6 @@ namespace StockManager.Config
 
                 public static readonly int UpdateInterval = 10;
 
-                // 🔑 Marketstack API 配置
-                // 免費註冊: https://marketstack.com/signup/free
-                // 免費計劃限制: 1000 次請求/月
-                public static readonly string MarketstackApiKey = "YOUR_API_KEY_HERE"; // ⚠️ 請替換為您的 API Key
-                public static readonly bool UseMarketstack = false; // ❌ 已禁用（僅使用 yfinance）
-                public static readonly string MarketstackBaseUrl = "http://api.marketstack.com/v1";
-
-                // 🔑 Intrinio API 配置
-                // 免費註冊: https://intrinio.com/signup
-                // 免費計劃限制: 500 次請求/天
-                public static readonly string IntrinioApiKey = "YOUR_API_KEY_HERE"; // ⚠️ 請替換為您的 API Key
-                public static readonly bool UseIntrinio = false; // ❌ 已禁用（僅使用 yfinance）
-                public static readonly string IntrinioBaseUrl = "https://api-v2.intrinio.com";
-
                 // 🐍 Python yfinance 配置
                 public static readonly bool UsePythonYFinance = true; // ✅ 已啟用（主要數據源）
                 public static readonly string PythonPath = ResolvePythonPath();
