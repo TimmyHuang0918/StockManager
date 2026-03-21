@@ -287,6 +287,7 @@
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>
+                                    <DataGridTextColumn Header="買賣建議" Binding="{Binding BuySellSuggestion}" Width="110"/>
                                     <DataGridTextColumn Header="資料來源" Binding="{Binding Source}" Width="120"/>
                                     <DataGridTextColumn Header="更新時間" Binding="{Binding UpdatedAt, StringFormat={}{0:HH:mm:ss}}" Width="100"/>
                                 </DataGrid.Columns>
@@ -478,6 +479,7 @@
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>
+                                    <DataGridTextColumn Header="買賣建議" Binding="{Binding BuySellSuggestion}" Width="110"/>
                                     <DataGridTextColumn Header="資料來源" Binding="{Binding Source}" Width="120"/>
                                     <DataGridTextColumn Header="更新時間" Binding="{Binding UpdatedAt, StringFormat={}{0:HH:mm:ss}}" Width="100"/>
                                 </DataGrid.Columns>

@@ -75,6 +75,8 @@ namespace StockManager
 	    private DateTime _lastSkResubscribeAt = DateTime.MinValue;
 	    private volatile bool _isSkSectorBatchUpdating = false;
 	    private readonly string _capitalCredentialFile = System.IO.Path.Combine(AppConfig.UserConfigDir, "capital_login_credential.dat");
+        private readonly Dictionary<string, Tuple<DateTime, List<CandlestickData>>> _advancedRecommendationHistoryCache = new Dictionary<string, Tuple<DateTime, List<CandlestickData>>>(StringComparer.OrdinalIgnoreCase);
+        private readonly TimeSpan _advancedRecommendationHistoryCacheTtl = TimeSpan.FromMinutes(15);
 
         public MainWindow()
         {
@@ -778,7 +780,7 @@ namespace StockManager
                 // 更新 UI 顯示
                 Dispatcher.Invoke(() =>
                 {
-                    UpdatePriceDisplay();
+                    UpdatePriceDisplay(true);
                     progressBar.Value = 0;
                     statusText.Text = $"✅ 預載完成 - 美股 {usSuccessCount}/{usTickers.Count}, 台股 {twSuccessCount}/{twTickers.Count}";
                 });
@@ -819,7 +821,7 @@ namespace StockManager
             statusText.Text = $"下次更新: {remaining} 秒 | 當前市場: {tabHeader}";
         }
 
-        private void UpdatePriceDisplay()
+        private void UpdatePriceDisplay(bool updateRecommendationColumns = false)
         {
             // 更新美股價格顯示
             var usPrices = _usPriceFetcher.GetPrices();
@@ -972,8 +974,11 @@ namespace StockManager
                 }
             }
 
-            UpdateTrendScores(_usStockList);
-            UpdateTrendScores(_twStockList);
+            if (updateRecommendationColumns)
+            {
+                UpdateTrendScores(_usStockList, _usPriceFetcher);
+                UpdateTrendScores(_twStockList, _twPriceFetcher);
+            }
 
             UpdateHoldingPrices("US");
             UpdateHoldingPrices("TW");
@@ -986,18 +991,118 @@ namespace StockManager
             Console.WriteLine("=== UI 已刷新 ===\n");
         }
 
-        private void UpdateTrendScores(IEnumerable<StockInfo> stocks)
+        private void UpdateTrendScores(IEnumerable<StockInfo> stocks, IMarketDataGateway marketDataGateway)
         {
             foreach (var stock in stocks)
             {
                 if (!stock.Price.HasValue)
                 {
                     stock.TrendScore = null;
+                    stock.BuySellSuggestion = "--";
                     continue;
                 }
 
                 stock.TrendScore = TradingRecommendationLibrary.CalculateSimpleScore(stock.Price, stock.PreviousClose, stock.ChangePercent);
+                var historyData = GetAdvancedRecommendationHistory(stock, marketDataGateway);
+                var advanced = TradingRecommendationLibrary.CalculateAdvancedRecommendation(historyData, stock.Price.Value, stock.ChangePercent, stock.PreviousClose);
+                stock.BuySellSuggestion = TradingRecommendationLibrary.GetAdvancedSuggestion(advanced.Score);
             }
+        }
+
+        private List<CandlestickData> GetAdvancedRecommendationHistory(StockInfo stock, IMarketDataGateway marketDataGateway)
+        {
+            if (stock == null || string.IsNullOrWhiteSpace(stock.Ticker) || marketDataGateway == null)
+            {
+                return BuildFallbackCandles(stock);
+            }
+
+            Tuple<DateTime, List<CandlestickData>> cacheEntry;
+            lock (_advancedRecommendationHistoryCache)
+            {
+                if (_advancedRecommendationHistoryCache.TryGetValue(stock.Ticker, out cacheEntry))
+                {
+                    if ((DateTime.Now - cacheEntry.Item1) <= _advancedRecommendationHistoryCacheTtl && cacheEntry.Item2 != null && cacheEntry.Item2.Count > 0)
+                    {
+                        return cacheEntry.Item2;
+                    }
+                }
+            }
+
+            List<MarketHistoryBar> bars;
+            if (marketDataGateway.TryGetHistoricalData(stock.Ticker, "3mo", "1d", out bars) && bars != null && bars.Count > 0)
+            {
+                var data = new List<CandlestickData>();
+                foreach (var bar in bars)
+                {
+                    var changeAmount = bar.Close - bar.Open;
+                    var changePercent = Math.Abs(bar.Open) > 0.000001 ? (changeAmount / bar.Open) * 100 : 0;
+                    data.Add(new CandlestickData
+                    {
+                        Date = bar.DateText,
+                        Open = bar.Open,
+                        High = bar.High,
+                        Low = bar.Low,
+                        Close = bar.Close,
+                        Volume = bar.Volume,
+                        ChangeAmount = changeAmount,
+                        ChangePercent = changePercent
+                    });
+                }
+
+                if (data.Count > 0)
+                {
+                    lock (_advancedRecommendationHistoryCache)
+                    {
+                        _advancedRecommendationHistoryCache[stock.Ticker] = Tuple.Create(DateTime.Now, data);
+                    }
+
+                    return data;
+                }
+            }
+
+            return BuildFallbackCandles(stock);
+        }
+
+        private List<CandlestickData> BuildFallbackCandles(StockInfo stock)
+        {
+            var result = new List<CandlestickData>();
+            if (stock == null || !stock.Price.HasValue)
+            {
+                return result;
+            }
+
+            var current = stock.Price.Value;
+            var previous = stock.PreviousClose ?? current;
+            var min = Math.Min(current, previous);
+            var max = Math.Max(current, previous);
+
+            result.Add(new CandlestickData
+            {
+                Date = DateTime.Now.AddDays(-1).ToString("yyyy-MM-dd"),
+                Open = previous,
+                High = max,
+                Low = min,
+                Close = previous,
+                Volume = 0,
+                ChangeAmount = 0,
+                ChangePercent = 0
+            });
+
+            var changeAmount = current - previous;
+            var changePercent = Math.Abs(previous) > 0.000001 ? (changeAmount / previous) * 100 : 0;
+            result.Add(new CandlestickData
+            {
+                Date = DateTime.Now.ToString("yyyy-MM-dd"),
+                Open = previous,
+                High = max,
+                Low = min,
+                Close = current,
+                Volume = 0,
+                ChangeAmount = changeAmount,
+                ChangePercent = changePercent
+            });
+
+            return result;
         }
 
         private void UpdateHoldingPrices(string market)
@@ -2279,7 +2384,7 @@ namespace StockManager
 
                 Dispatcher.Invoke(() =>
                             {
-                        UpdatePriceDisplay();
+                        UpdatePriceDisplay(true);
                         statusText.Text = "✅ 刷新完成";
                         Console.WriteLine($"[手動刷新] 刷新完成，下次可刷新時間: {DateTime.Now.AddSeconds(MANUAL_REFRESH_COOLDOWN):HH:mm:ss}");
                     });

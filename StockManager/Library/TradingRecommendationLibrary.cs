@@ -12,14 +12,16 @@ namespace StockManager.Library
 
     public static class TradingRecommendationLibrary
     {
-        public static TrendRecommendationResult CalculateAdvancedRecommendation(List<CandlestickData> data, double currentPrice, double? changePercent)
+        public static TrendRecommendationResult CalculateAdvancedRecommendation(List<CandlestickData> data, double currentPrice, double? changePercent, double? previousClose = null)
         {
             var reasons = new List<string>();
             if (data == null || data.Count < 2)
             {
+                var simpleScore = CalculateSimpleScore(currentPrice, previousClose, changePercent);
+                reasons.Add("歷史資料不足，使用即時價格簡化模型評分");
                 return new TrendRecommendationResult
                 {
-                    Score = 50,
+                    Score = simpleScore,
                     Reasons = reasons
                 };
             }
@@ -171,6 +173,13 @@ namespace StockManager.Library
         }
 
         public static string GetSimpleSuggestion(int score)
+        {
+            if (score >= 70) return "偏多（買入）";
+            if (score >= 50) return "中性（觀望）";
+            return "偏空（賣出）";
+        }
+
+        public static string GetAdvancedSuggestion(int score)
         {
             if (score >= 70) return "偏多（買入）";
             if (score >= 50) return "中性（觀望）";

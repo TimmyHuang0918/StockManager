@@ -2090,8 +2090,8 @@ namespace StockManager
                                         Padding = new Thickness(3, 1, 3, 1)
                                 };
 
-                                ToolTipService.SetToolTip(marker,
-                                        $"{signal.Item2} 建議\n日期: {candle.Date}\n收盤: ${candle.Close:F2}\n強度: {(isStrong ? "高" : "一般")}\n原因: {signal.Item3}");
+                                ToolTipService.SetToolTip(marker, CreateCandlestickToolTip(
+                                        $"{signal.Item2} 建議\n日期: {candle.Date}\n收盤: ${candle.Close:F2}\n強度: {(isStrong ? "高" : "一般")}\n原因: {signal.Item3}"));
 
                                 Canvas.SetLeft(marker, x - 7);
                                 Canvas.SetTop(marker, isBuy ? lowY + 4 : highY - 20);

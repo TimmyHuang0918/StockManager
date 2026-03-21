@@ -11,6 +11,7 @@ namespace StockManager.Models
                 private double? _changePercent;
                 private double? _previousClose;
                 private int? _trendScore;
+                private string _buySellSuggestion;
                 private string _source;
                 private DateTime? _updatedAt;
 
@@ -71,6 +72,16 @@ namespace StockManager.Models
                         {
                                 _trendScore = value;
                                 OnPropertyChanged(nameof(TrendScore));
+                        }
+                }
+
+                public string BuySellSuggestion
+                {
+                        get => _buySellSuggestion;
+                        set
+                        {
+                                _buySellSuggestion = value;
+                                OnPropertyChanged(nameof(BuySellSuggestion));
                         }
                 }
 
