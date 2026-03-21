@@ -1,9 +1,14 @@
 ﻿<Window x:Class="StockManager.TrendAnalysisWindow"
                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+				xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
                 Title="股票趨勢分析" Height="750" Width="1100"
                 WindowStartupLocation="CenterOwner" Background="#121722">
-	<Window.Resources>
+
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="40" ResizeBorderThickness="6" CornerRadius="0" GlassFrameThickness="0" UseAeroCaptionButtons="False"/>
+    </shell:WindowChrome.WindowChrome>
+    <Window.Resources>
 		<!-- 樣式定義 -->
 		<Style x:Key="StatCardStyle" TargetType="Border">
 			<Setter Property="Background" Value="#1B2433"/>
@@ -152,7 +157,7 @@
 		</Grid.RowDefinitions>
 
 		<!-- 標題列 -->
-		<Border Grid.Row="0" Background="#1976D2" Padding="20">
+     <Border Grid.Row="0" Background="#162133" Padding="20">
 			<Grid>
 				<Grid.ColumnDefinitions>
 					<ColumnDefinition Width="*"/>
@@ -160,7 +165,7 @@
 				</Grid.ColumnDefinitions>
 				<StackPanel Grid.Column="0">
 					<TextBlock x:Name="txtTitle" Text="股票趨勢分析" FontSize="24" FontWeight="Bold" Foreground="White"/>
-					<TextBlock x:Name="txtSubtitle" Text="載入中..." FontSize="13" Foreground="#E3F2FD" Margin="0,5,0,0"/>
+                 <TextBlock x:Name="txtSubtitle" Text="載入中..." FontSize="13" Foreground="#B7C9DB" Margin="0,5,0,0"/>
 					<ProgressBar x:Name="pbLoading" Height="6" Width="280" Margin="0,8,0,0" Visibility="Collapsed" Minimum="0" Maximum="100" Value="0"/>
 				</StackPanel>
 				<StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">

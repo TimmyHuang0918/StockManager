@@ -12,6 +12,7 @@ using System.Windows.Media;
 using System.Windows.Shapes;
 using System.Xml.Linq;
 using StockManager.Config;
+using StockManager.Library;
 using StockManager.Services;
 
 namespace StockManager
@@ -2386,124 +2387,9 @@ namespace StockManager
                                 return;
                         }
 
-                        var closes = data.Select(d => d.Close).ToList();
-                        var avgPrice = closes.Average();
-                        var latest = data.Last();
-
-                        // 綜合評分 (0-100)
-                        int score = 50;
-                        var reasons = new List<string>();
-
-                        // 1) MA 結構
-                        var ma5 = CalculateMA(closes, 5);
-                        var ma20 = CalculateMA(closes, 20);
-                        if (currentPrice > ma5 && ma5 > ma20)
-                        {
-                                score += 12;
-                                reasons.Add($"MA 多頭排列（現價 {currentPrice:F2} > MA5 {ma5:F2} > MA20 {ma20:F2}）");
-                        }
-                        else if (currentPrice < ma5 && ma5 < ma20)
-                        {
-                                score -= 12;
-                                reasons.Add($"MA 空頭排列（現價 {currentPrice:F2} < MA5 {ma5:F2} < MA20 {ma20:F2}）");
-                        }
-                        else
-                        {
-                                reasons.Add("MA 結構中性，趨勢尚未明確");
-                        }
-
-                        // 2) MACD（快慢線 + 柱狀體動能）
-                        var macdTuple = BuildMACDComponents(closes);
-                        var macd = macdTuple.Item1.Last();
-                        var signal = macdTuple.Item2.Last();
-                        var hist = macdTuple.Item3.Last();
-                        var prevHist = macdTuple.Item3.Count > 1 ? macdTuple.Item3[macdTuple.Item3.Count - 2] : hist;
-
-                        if (macd > signal)
-                        {
-                                score += 14;
-                                reasons.Add($"MACD 位於訊號線上方（MACD {macd:F3} > Signal {signal:F3}）");
-                        }
-                        else
-                        {
-                                score -= 14;
-                                reasons.Add($"MACD 位於訊號線下方（MACD {macd:F3} < Signal {signal:F3}）");
-                        }
-
-                        if (hist > prevHist)
-                        {
-                                score += 6;
-                                reasons.Add("MACD 柱狀體擴大，短線動能轉強");
-                        }
-                        else if (hist < prevHist)
-                        {
-                                score -= 6;
-                                reasons.Add("MACD 柱狀體縮小，短線動能轉弱");
-                        }
-
-                        // 3) RSI
-                        var rsi = CalculateRSI(closes, 14);
-                        if (rsi < 30)
-                        {
-                                score += 10;
-                                reasons.Add($"RSI={rsi:F1} 處於超賣區，具反彈機會");
-                        }
-                        else if (rsi > 70)
-                        {
-                                score -= 10;
-                                reasons.Add($"RSI={rsi:F1} 處於超買區，短線回檔風險較高");
-                        }
-                        else if (rsi >= 45 && rsi <= 60)
-                        {
-                                score += 3;
-                                reasons.Add($"RSI={rsi:F1} 位於中性偏多區間");
-                        }
-                        else
-                        {
-                                reasons.Add($"RSI={rsi:F1}，未出現極端訊號");
-                        }
-
-                        // 4) 成交量確認
-                        var avgVol20 = data.Skip(Math.Max(0, data.Count - 20)).Average(x => (double)x.Volume);
-                        var volumeRatio = avgVol20 > 0 ? latest.Volume / avgVol20 : 1.0;
-                        if (volumeRatio >= 1.2)
-                        {
-                                if (macd > signal)
-                                {
-                                        score += 8;
-                                        reasons.Add($"成交量放大 {volumeRatio:F2} 倍，且多方訊號成立");
-                                }
-                                else
-                                {
-                                        score -= 8;
-                                        reasons.Add($"成交量放大 {volumeRatio:F2} 倍，但空方訊號較強");
-                                }
-                        }
-                        else
-                        {
-                                reasons.Add($"成交量為 20 日均量的 {volumeRatio:F2} 倍，量能一般");
-                        }
-
-                        // 5) 價格相對平均位階
-                        if (currentPrice > avgPrice * 1.08)
-                        {
-                                score -= 4;
-                                reasons.Add("現價偏離均價較高，追價風險上升");
-                        }
-                        else if (currentPrice < avgPrice * 0.92)
-                        {
-                                score += 4;
-                                reasons.Add("現價低於均價，具均值回歸空間");
-                        }
-
-                        // 當日波動加權
-                        if (changePercent.HasValue)
-                        {
-                                if (changePercent.Value >= 3) score += 2;
-                                else if (changePercent.Value <= -3) score -= 2;
-                        }
-
-                        score = Math.Max(0, Math.Min(100, score));
+                        var recommendation = TradingRecommendationLibrary.CalculateAdvancedRecommendation(data, currentPrice, changePercent);
+                        var score = recommendation.Score;
+                        var reasons = recommendation.Reasons ?? new List<string>();
 
                         txtScore.Text = score.ToString();
                         pbScore.Value = score;

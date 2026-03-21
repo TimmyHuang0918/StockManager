@@ -91,12 +91,18 @@
     <Compile Include="Config\TaiwanSectorConfigData.cs" />
     <Compile Include="Converters\PositiveNegativeConverter.cs" />
     <Compile Include="DebugWindow.xaml.cs" />
+    <Compile Include="Library\TradingRecommendationLibrary.cs" />
+    <Compile Include="MainWindow.CapitalLogin.CredentialStore.cs" />
+    <Compile Include="MainWindow.CapitalLogin.SkRuntime.cs" />
+    <Compile Include="MainWindow.CapitalLogin.UI.cs" />
     <Compile Include="Services\CompositeMarketDataGateway.cs" />
     <Compile Include="Services\IMarketDataGateway.cs" />
     <Compile Include="Services\MonitorService.cs" />
     <Compile Include="Services\PriceFetcherService.cs" />
     <Compile Include="Services\StockManagerService.cs" />
-    <Compile Include="TrendAnalysisWindow.xaml.cs" />
+    <Compile Include="TrendAnalysisWindow.xaml.cs">
+      <DependentUpon>TrendAnalysisWindow.xaml</DependentUpon>
+    </Compile>
     <Compile Include="TwStockFilterWindow.xaml.cs">
       <DependentUpon>TwStockFilterWindow.xaml</DependentUpon>
     </Compile>

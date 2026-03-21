@@ -4,6 +4,45 @@
                         xmlns:local="clr-namespace:StockManager"
                         StartupUri="MainWindow.xaml">
         <Application.Resources>
+                <SolidColorBrush x:Key="Brush.WindowBg" Color="#121722"/>
+                <SolidColorBrush x:Key="Brush.Surface" Color="#1B2433"/>
+                <SolidColorBrush x:Key="Brush.SurfaceAlt" Color="#1F2A3D"/>
+                <SolidColorBrush x:Key="Brush.Border" Color="#32445E"/>
+                <SolidColorBrush x:Key="Brush.TextPrimary" Color="#E3ECF5"/>
+                <SolidColorBrush x:Key="Brush.TextSecondary" Color="#9FB3C8"/>
+
+                <Style TargetType="Window">
+                        <Setter Property="Background" Value="{StaticResource Brush.WindowBg}"/>
+                        <Setter Property="Foreground" Value="{StaticResource Brush.TextPrimary}"/>
+                </Style>
+
+                <Style TargetType="TextBlock">
+                        <Setter Property="Foreground" Value="{StaticResource Brush.TextPrimary}"/>
+                </Style>
+
+                <Style TargetType="TextBox">
+                        <Setter Property="Background" Value="{StaticResource Brush.SurfaceAlt}"/>
+                        <Setter Property="Foreground" Value="{StaticResource Brush.TextPrimary}"/>
+                        <Setter Property="BorderBrush" Value="{StaticResource Brush.Border}"/>
+                        <Setter Property="BorderThickness" Value="1"/>
+                        <Setter Property="Padding" Value="6,2"/>
+                </Style>
+
+                <Style TargetType="ComboBox">
+                        <Setter Property="Background" Value="{StaticResource Brush.SurfaceAlt}"/>
+                        <Setter Property="Foreground" Value="{StaticResource Brush.TextPrimary}"/>
+                        <Setter Property="BorderBrush" Value="{StaticResource Brush.Border}"/>
+                        <Setter Property="BorderThickness" Value="1"/>
+                </Style>
+
+                <Style TargetType="Button">
+                        <Setter Property="Foreground" Value="White"/>
+                        <Setter Property="BorderThickness" Value="0"/>
+                        <Setter Property="Background" Value="#455A64"/>
+                        <Setter Property="Padding" Value="10,4"/>
+                        <Setter Property="Cursor" Value="Hand"/>
+                </Style>
+
                 <Style x:Key="SlimScrollThumbStyle" TargetType="Thumb">
                         <Setter Property="OverridesDefaultStyle" Value="True"/>
                         <Setter Property="Template">

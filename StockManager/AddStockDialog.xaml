@@ -4,7 +4,7 @@
                 Title="新增股票" Height="500" Width="420"
                 WindowStartupLocation="CenterOwner"
                 ResizeMode="NoResize"
-                Background="#ECF0F1">
+                Background="#121722">
         <Grid Margin="20">
                 <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
@@ -16,7 +16,7 @@
 
                 <!-- 市場選擇 -->
                 <StackPanel Grid.Row="0" Margin="0,0,0,15">
-                        <TextBlock Text="市場:" FontWeight="Bold" Margin="0,0,0,5"/>
+                        <TextBlock Text="市場:" FontWeight="Bold" Margin="0,0,0,5" Foreground="#E3ECF5"/>
                         <ComboBox x:Name="cmbMarket" Height="30" FontSize="14" SelectionChanged="CmbMarket_SelectionChanged">
                                 <ComboBoxItem Content="美股 (US)" IsSelected="True" Tag="US"/>
                                 <ComboBoxItem Content="台股 (TW)" Tag="TW"/>
@@ -25,22 +25,23 @@
 
                 <!-- 股票代號 -->
                 <StackPanel Grid.Row="1" Margin="0,0,0,15">
-                        <TextBlock Text="股票代號:" FontWeight="Bold" Margin="0,0,0,5"/>
+                        <TextBlock Text="股票代號:" FontWeight="Bold" Margin="0,0,0,5" Foreground="#E3ECF5"/>
                         <TextBox x:Name="txtTicker" Height="30" FontSize="14" VerticalContentAlignment="Center" TextChanged="TxtTicker_TextChanged"/>
-                        <TextBlock Text="例如: AAPL 或 2330.TW" Foreground="Gray" FontSize="10" Margin="0,3,0,0"/>
+                        <TextBlock Text="例如: AAPL 或 2330.TW" Foreground="#9FB3C8" FontSize="10" Margin="0,3,0,0"/>
                 </StackPanel>
 
                 <!-- 股票名稱 -->
                 <StackPanel Grid.Row="2" Margin="0,0,0,15">
-                        <TextBlock Text="公司名稱:" FontWeight="Bold" Margin="0,0,0,5"/>
+                        <TextBlock Text="公司名稱:" FontWeight="Bold" Margin="0,0,0,5" Foreground="#E3ECF5"/>
                         <TextBox x:Name="txtName" Height="30" FontSize="14" VerticalContentAlignment="Center"/>
-                        <TextBlock Text="例如: 蘋果公司 或 台積電" Foreground="Gray" FontSize="10" Margin="0,3,0,0"/>
+                        <TextBlock Text="例如: 蘋果公司 或 台積電" Foreground="#9FB3C8" FontSize="10" Margin="0,3,0,0"/>
                 </StackPanel>
 
                 <!-- 建議清單 -->
                 <StackPanel Grid.Row="3" Margin="0,0,0,10">
-                        <TextBlock Text="建議股票（可點選自動帶入）:" FontWeight="Bold" Margin="0,0,0,5"/>
-                        <ListBox x:Name="lstSuggestions" MinHeight="170" SelectionChanged="LstSuggestions_SelectionChanged"/>
+                        <TextBlock Text="建議股票（可點選自動帶入）:" FontWeight="Bold" Margin="0,0,0,5" Foreground="#E3ECF5"/>
+                        <ListBox x:Name="lstSuggestions" MinHeight="170" SelectionChanged="LstSuggestions_SelectionChanged"
+                                 Background="#1B2433" Foreground="#E3ECF5" BorderBrush="#32445E"/>
                 </StackPanel>
 
                 <!-- 按鈕 -->

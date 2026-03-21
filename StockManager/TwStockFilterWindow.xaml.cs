@@ -17,6 +17,7 @@ using System.Windows.Shapes;
 using System.Web.Script.Serialization;
 using StockManager.Config;
 using StockManager.Converters;
+using StockManager.Library;
 using StockManager.Models;
 using StockManager.Services;
 using IOPath = System.IO.Path;
@@ -2738,38 +2739,12 @@ namespace StockManager
 
         private int CalculateTradingScore(StockInfo stock)
         {
-            var score = 50;
-            var change = stock.ChangePercent;
-
-            if (change.HasValue)
-            {
-                if (change.Value >= 4) score += 20;
-                else if (change.Value >= 2) score += 12;
-                else if (change.Value > 0) score += 5;
-                else if (change.Value <= -4) score -= 20;
-                else if (change.Value <= -2) score -= 12;
-                else if (change.Value < 0) score -= 5;
-            }
-            else
-            {
-                score -= 5;
-            }
-
-            if (stock.Price.HasValue && stock.PreviousClose.HasValue)
-            {
-                var gap = stock.Price.Value - stock.PreviousClose.Value;
-                if (gap > 0) score += 3;
-                else if (gap < 0) score -= 3;
-            }
-
-            return Math.Max(0, Math.Min(100, score));
+            return TradingRecommendationLibrary.CalculateSimpleScore(stock.Price, stock.PreviousClose, stock.ChangePercent);
         }
 
         private string GetTradingSuggestion(int score)
         {
-            if (score >= 70) return "偏多（買入）";
-            if (score >= 50) return "中性（觀望）";
-            return "偏空（賣出）";
+            return TradingRecommendationLibrary.GetSimpleSuggestion(score);
         }
 
         private class TwFilterStockItem

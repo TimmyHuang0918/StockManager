@@ -6,7 +6,7 @@
         Width="380"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
-        Background="#F5F7FA">
+        Background="#121722">
     <Grid Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -15,9 +15,9 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <TextBlock Grid.Row="0" Text="Please enter initial cash" FontWeight="Bold" Foreground="#2C3E50"/>
+        <TextBlock Grid.Row="0" Text="Please enter initial cash" FontWeight="Bold" Foreground="#E3ECF5"/>
         <TextBox Grid.Row="1" x:Name="txtCashAmount" Height="30" Margin="0,8,0,0" VerticalContentAlignment="Center"/>
-        <TextBlock Grid.Row="2" Text="Amount must be greater than or equal to 0" FontSize="11" Foreground="#607D8B" Margin="0,8,0,0"/>
+        <TextBlock Grid.Row="2" Text="Amount must be greater than or equal to 0" FontSize="11" Foreground="#9FB3C8" Margin="0,8,0,0"/>
 
         <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
             <Button Content="OK" Width="80" Height="30" Margin="0,0,8,0" Click="BtnOk_Click" Background="#27AE60" Foreground="White" BorderThickness="0"/>

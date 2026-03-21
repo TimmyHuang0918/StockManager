@@ -166,7 +166,7 @@
         </Border>
 
         <!-- 頂部工具列 -->
-        <Border Grid.Row="1" Grid.ColumnSpan="2" Background="#2C3E50" Padding="10">
+        <Border Grid.Row="1" Grid.ColumnSpan="2" Background="#1B2433" Padding="10">
             <StackPanel Orientation="Horizontal">
                 <TextBlock Text="股票監控系統" FontSize="20" FontWeight="Bold" Foreground="White" VerticalAlignment="Center" Margin="10,0"/>
                 <Button x:Name="btnAddStock" Content="+ 新增股票" Width="100" Height="30" Margin="20,0,10,0" Click="BtnAddStock_Click"
@@ -178,7 +178,7 @@
                 <TextBlock Text="庫存使用者:" Foreground="White" VerticalAlignment="Center" Margin="20,0,8,0"/>
                 <ComboBox x:Name="cboHoldingUser" Width="140" Height="23"
                           SelectionChanged="CboHoldingUser_SelectionChanged"
-                          Background="#1F2A3D" Foreground="Black" BorderBrush="#3A4A63" Opacity="1">
+                          Background="#1F2A3D" Foreground="#E3ECF5" BorderBrush="#3A4A63" Opacity="1">
                     <ComboBox.Resources>
                         <SolidColorBrush x:Key="{x:Static SystemColors.WindowBrushKey}" Color="#1F2A3D"/>
                         <SolidColorBrush x:Key="{x:Static SystemColors.ControlBrushKey}" Color="#1F2A3D"/>
