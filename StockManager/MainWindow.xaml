@@ -265,6 +265,28 @@
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>
+                                    <DataGridTemplateColumn Header="趨勢" Width="80">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock HorizontalAlignment="Center">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Text" Value="{Binding TrendScore}"/>
+                                                            <Setter Property="FontWeight" Value="Bold"/>
+                                                            <Setter Property="Foreground" Value="#7CC7FF"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding TrendScore}" Value="{x:Null}">
+                                                                    <Setter Property="Text" Value="--"/>
+                                                                    <Setter Property="Foreground" Value="Gray"/>
+                                                                    <Setter Property="FontWeight" Value="Normal"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
                                     <DataGridTextColumn Header="資料來源" Binding="{Binding Source}" Width="120"/>
                                     <DataGridTextColumn Header="更新時間" Binding="{Binding UpdatedAt, StringFormat={}{0:HH:mm:ss}}" Width="100"/>
                                 </DataGrid.Columns>
@@ -425,6 +447,28 @@
                                                                 <DataTrigger Binding="{Binding ChangePercent}" Value="{x:Null}">
                                                                     <Setter Property="Foreground" Value="Gray"/>
                                                                     <Setter Property="Text" Value="--"/>
+                                                                    <Setter Property="FontWeight" Value="Normal"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTemplateColumn Header="趨勢" Width="80">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock HorizontalAlignment="Center">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Text" Value="{Binding TrendScore}"/>
+                                                            <Setter Property="FontWeight" Value="Bold"/>
+                                                            <Setter Property="Foreground" Value="#7CC7FF"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding TrendScore}" Value="{x:Null}">
+                                                                    <Setter Property="Text" Value="--"/>
+                                                                    <Setter Property="Foreground" Value="Gray"/>
                                                                     <Setter Property="FontWeight" Value="Normal"/>
                                                                 </DataTrigger>
                                                             </Style.Triggers>

@@ -1,6 +1,7 @@
 ﻿using SKCOMLib;
 using SKDLLCSharp;
 using StockManager.Config;
+using StockManager.Library;
 using StockManager.Services;
 using System;
 using System.Collections.Generic;
@@ -971,6 +972,9 @@ namespace StockManager
                 }
             }
 
+            UpdateTrendScores(_usStockList);
+            UpdateTrendScores(_twStockList);
+
             UpdateHoldingPrices("US");
             UpdateHoldingPrices("TW");
 
@@ -980,6 +984,20 @@ namespace StockManager
             dgTwHoldings.Items.Refresh();
             _ = UpdateNewsImpactAsync();
             Console.WriteLine("=== UI 已刷新 ===\n");
+        }
+
+        private void UpdateTrendScores(IEnumerable<StockInfo> stocks)
+        {
+            foreach (var stock in stocks)
+            {
+                if (!stock.Price.HasValue)
+                {
+                    stock.TrendScore = null;
+                    continue;
+                }
+
+                stock.TrendScore = TradingRecommendationLibrary.CalculateSimpleScore(stock.Price, stock.PreviousClose, stock.ChangePercent);
+            }
         }
 
         private void UpdateHoldingPrices(string market)

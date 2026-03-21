@@ -10,6 +10,7 @@ namespace StockManager.Models
                 private double? _price;
                 private double? _changePercent;
                 private double? _previousClose;
+                private int? _trendScore;
                 private string _source;
                 private DateTime? _updatedAt;
 
@@ -60,6 +61,16 @@ namespace StockManager.Models
                         {
                                 _previousClose = value;
                                 OnPropertyChanged(nameof(PreviousClose));
+                        }
+                }
+
+                public int? TrendScore
+                {
+                        get => _trendScore;
+                        set
+                        {
+                                _trendScore = value;
+                                OnPropertyChanged(nameof(TrendScore));
                         }
                 }
 
