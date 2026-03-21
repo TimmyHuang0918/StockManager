@@ -82,6 +82,7 @@ namespace StockManager
 	private readonly HashSet<string> _skSubscribedTwStocks = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 	private DateTime _lastSkQuoteReceivedAt = DateTime.MinValue;
 	private DateTime _lastSkResubscribeAt = DateTime.MinValue;
+	private volatile bool _isSkSectorBatchUpdating = false;
 	private readonly string _capitalCredentialFile = System.IO.Path.Combine(AppConfig.UserConfigDir, "capital_login_credential.dat");
 
 	public MainWindow()
@@ -921,7 +922,10 @@ namespace StockManager
 
             if (_isCapitalLoggedIn)
             {
-                EnsureSkSubscriptionAlive();
+                if (!_isSkSectorBatchUpdating)
+                {
+                    EnsureSkSubscriptionAlive();
+                }
                 ApplySkTwQuotesToStockList();
             }
             else
@@ -1351,6 +1355,8 @@ namespace StockManager
         private async void BtnTwYFinanceCacheUpdate_Click(object sender, RoutedEventArgs e)
         {
             var button = sender as Button;
+            var useSkBatch = _isCapitalLoggedIn;
+            var skBatchSnapshot = new Dictionary<string, Tuple<double?, double?, double?, DateTime>>(StringComparer.OrdinalIgnoreCase);
             var cacheProgressBar = FindName("pbTwSectorCacheUpdate") as ProgressBar;
             var cachePercentText = FindName("txtTwSectorCachePercent") as TextBlock;
             var cacheEtaText = FindName("txtTwSectorCacheEta") as TextBlock;
@@ -1375,7 +1381,9 @@ namespace StockManager
                 cacheEtaText.Visibility = Visibility.Visible;
             }
 
-            statusText.Text = "台股族群 yfinance 快取更新中...";
+            statusText.Text = useSkBatch
+                ? "台股族群更新中（群益批次訂閱）..."
+                : "台股族群 yfinance 快取更新中...";
 
             try
             {
@@ -1387,6 +1395,114 @@ namespace StockManager
 
                 await Task.Run(() =>
                 {
+                    if (useSkBatch)
+                    {
+                        _isSkSectorBatchUpdating = true;
+
+                        var homeStockNos = _twStockList
+                            .Select(x => NormalizeTwTickerForSkRequest(x.Ticker))
+                            .Where(x => !string.IsNullOrWhiteSpace(x))
+                            .Distinct(StringComparer.OrdinalIgnoreCase)
+                            .ToList();
+
+                        if (homeStockNos.Count > 0)
+                        {
+                            var homeCancelArg = string.Join(",", homeStockNos);
+                            var homeCancelCode = SK.SKQuoteLib_CancelRequestStocks(homeCancelArg);
+                            Console.WriteLine($"[SK族群前取消主頁訂閱] {homeCancelArg} => {homeCancelCode}");
+                        }
+
+                        var sectorStockNos = tickers
+                            .Select(NormalizeTwTickerForSkRequest)
+                            .Where(x => !string.IsNullOrWhiteSpace(x))
+                            .Distinct(StringComparer.OrdinalIgnoreCase)
+                            .ToList();
+
+                        var skTotal = Math.Max(1, sectorStockNos.Count);
+                        var skStopwatch = System.Diagnostics.Stopwatch.StartNew();
+                        var batchSize = 80;
+                        var completed = 0;
+
+                        for (int i = 0; i < sectorStockNos.Count; i += batchSize)
+                        {
+                            var batch = sectorStockNos.Skip(i).Take(batchSize).ToList();
+                            if (batch.Count == 0)
+                            {
+                                continue;
+                            }
+
+                            var batchArg = string.Join(",", batch);
+                            var requestCode = SK.SKQuoteLib_RequestStocks(batchArg);
+                            Console.WriteLine($"[SK族群批次訂閱] {batchArg} => {requestCode}");
+
+                            var waitUntil = DateTime.Now.AddSeconds(5);
+                            while (DateTime.Now < waitUntil)
+                            {
+                                var allReceived = true;
+                                lock (_skTwQuoteLock)
+                                {
+                                    foreach (var stockNo in batch)
+                                    {
+                                        var uiTicker = NormalizeTwTickerForUi(stockNo);
+                                        Tuple<double?, double?, double?, DateTime> quote;
+                                        if (_twSkQuoteCache.TryGetValue(uiTicker, out quote))
+                                        {
+                                            skBatchSnapshot[uiTicker] = quote;
+                                        }
+                                        else
+                                        {
+                                            allReceived = false;
+                                        }
+                                    }
+                                }
+
+                                if (allReceived)
+                                {
+                                    break;
+                                }
+
+                                Thread.Sleep(120);
+                            }
+
+                            var cancelCode = SK.SKQuoteLib_CancelRequestStocks(batchArg);
+                            Console.WriteLine($"[SK族群批次取消] {batchArg} => {cancelCode}");
+
+                            completed += batch.Count;
+                            var percent = Math.Min(100, completed * 100.0 / skTotal);
+                            var elapsed = skStopwatch.Elapsed.TotalSeconds;
+                            var avgPerItem = elapsed / Math.Max(1, completed);
+                            var remainingSeconds = Math.Max(0, (skTotal - completed) * avgPerItem);
+                            var eta = TimeSpan.FromSeconds(remainingSeconds);
+                            Dispatcher.BeginInvoke(new Action(() =>
+                            {
+                                if (cacheProgressBar != null)
+                                {
+                                    cacheProgressBar.Value = percent;
+                                }
+                                if (cachePercentText != null)
+                                {
+                                    cachePercentText.Text = $"{percent:F0}%";
+                                }
+                                if (cacheEtaText != null)
+                                {
+                                    cacheEtaText.Text = $"預估剩餘 {eta:mm\\:ss}";
+                                }
+                            }));
+
+                            Thread.Sleep(120);
+                        }
+
+                        if (homeStockNos.Count > 0)
+                        {
+                            var homeSubscribeArg = string.Join(",", homeStockNos);
+                            var homeSubscribeCode = SK.SKQuoteLib_RequestStocks(homeSubscribeArg);
+                            Console.WriteLine($"[SK族群後恢復主頁訂閱] {homeSubscribeArg} => {homeSubscribeCode}");
+                        }
+
+                        _isSkSectorBatchUpdating = false;
+                        return;
+                    }
+
                     var total = Math.Max(1, tickers.Count);
                     var stopwatch = System.Diagnostics.Stopwatch.StartNew();
                     for (int i = 0; i < tickers.Count; i++)
@@ -1427,6 +1543,27 @@ namespace StockManager
                 foreach (var t in tickers)
                 {
                     var normalized = t.EndsWith(".TW", StringComparison.OrdinalIgnoreCase) ? t : (t + ".TW");
+                    if (useSkBatch)
+                    {
+                        var uiTicker = NormalizeTwTickerForUi(normalized);
+                        Tuple<double?, double?, double?, DateTime> quote;
+                        if (!skBatchSnapshot.TryGetValue(uiTicker, out quote))
+                        {
+                            continue;
+                        }
+
+                        cacheItems.Add(new Dictionary<string, object>
+                                        {
+                                                { "Ticker", t.EndsWith(".TW", StringComparison.OrdinalIgnoreCase) ? t.Substring(0, t.Length - 3) : t },
+                                                { "Price", quote.Item1 },
+                                                { "PreviousClose", quote.Item2 },
+                                                { "ChangePercent", quote.Item3 },
+                                                { "UpdatedAt", quote.Item4 },
+                                                { "Source", "SK.OnNotifyQuoteLONG" }
+                                        });
+                        continue;
+                    }
+
                     Tuple<double?, double?> priceTuple;
                     if (!prices.TryGetValue(normalized, out priceTuple))
                     {
@@ -1457,7 +1594,8 @@ namespace StockManager
                                                 { "Price", currentPrice },
                                                 { "PreviousClose", previousClose },
                                                 { "ChangePercent", changePercent },
-                                                { "UpdatedAt", DateTime.Now }
+                                                { "UpdatedAt", DateTime.Now },
+                                                { "Source", "yfinance" }
                                         });
                 }
 
@@ -1476,7 +1614,15 @@ namespace StockManager
                 var cacheFile = System.IO.Path.Combine(AppConfig.UserConfigDir, "tw_sector_yfinance_cache.json");
                 File.WriteAllText(cacheFile, serializer.Serialize(payload), Encoding.UTF8);
 
-                statusText.Text = $"✅ 台股族群 yfinance 快取已更新（{cacheItems.Count} 檔）";
+                var twFilterControl = FindName("twStockFilterWindow") as TwStockFilterWindow;
+                if (twFilterControl != null)
+                {
+                    await twFilterControl.RefreshFromSectorCacheAsync();
+                }
+
+                statusText.Text = useSkBatch
+                    ? $"✅ 台股族群快取已更新（群益批次，{cacheItems.Count} 檔）"
+                    : $"✅ 台股族群 yfinance 快取已更新（{cacheItems.Count} 檔）";
                 if (cachePercentText != null)
                 {
                     cachePercentText.Text = "100%";
@@ -1494,6 +1640,11 @@ namespace StockManager
             }
             finally
             {
+                if (useSkBatch)
+                {
+                    _isSkSectorBatchUpdating = false;
+                }
+
                 if (cacheProgressBar != null)
                 {
                     cacheProgressBar.Visibility = Visibility.Collapsed;
@@ -2717,7 +2868,7 @@ namespace StockManager
 
 	private void EnsureSkSubscriptionAlive()
 	{
-	    if (!_isCapitalLoggedIn || _skSubscribedTwStocks.Count == 0)
+	    if (_isSkSectorBatchUpdating || !_isCapitalLoggedIn || _skSubscribedTwStocks.Count == 0)
 	    {
 		return;
 	    }

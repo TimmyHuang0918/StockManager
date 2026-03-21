@@ -441,7 +441,7 @@
                         </TabItem>
 
                         <TabItem Header="台股篩選">
-                            <local:TwStockFilterWindow/>
+                            <local:TwStockFilterWindow x:Name="twStockFilterWindow"/>
                         </TabItem>
 
                         <TabItem Header="庫存">

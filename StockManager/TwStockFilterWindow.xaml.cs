@@ -7,6 +7,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -59,6 +60,12 @@ namespace StockManager
         private async void TwStockFilterWindow_Loaded(object sender, RoutedEventArgs e)
         {
             await System.Threading.Tasks.Task.Run(() => LoadAllListedTwStocks());
+            ApplyFilter();
+        }
+
+        public async Task RefreshFromSectorCacheAsync()
+        {
+            await Task.Run(() => LoadAllListedTwStocks());
             ApplyFilter();
         }
 
