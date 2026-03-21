@@ -9,6 +9,7 @@ namespace StockManager.Services
                 private readonly IMarketDataGateway _priceFetcher;
                 private Thread _priceThread;
                 private bool _running;
+                private volatile bool _paused;
                 private int _interval = 10;
 
                 public MonitorService(StockManagerService stockManager, IMarketDataGateway priceFetcher)
@@ -35,16 +36,32 @@ namespace StockManager.Services
                         }
                 }
 
+                public void Pause()
+                {
+                        _paused = true;
+                }
+
+                public void Resume()
+                {
+                        _paused = false;
+                }
+
                 private void PriceUpdateLoop()
                 {
                         while (_running)
                         {
                                 try
                                 {
+                                        if (_paused)
+                                        {
+                                                Thread.Sleep(200);
+                                                continue;
+                                        }
+
                                         var tickers = _stockManager.GetTickers();
                                         foreach (var ticker in tickers)
                                         {
-                                                if (!_running) break;
+                                                if (!_running || _paused) break;
 
                                                 // 使用新方法：獲取價格和前收盤價
                                                 _priceFetcher.UpdatePriceWithPreviousClose(ticker);

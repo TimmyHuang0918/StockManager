@@ -64,6 +64,7 @@ namespace StockManager
         // 手動刷新防抖動
         private DateTime _lastManualRefresh = DateTime.MinValue;
         private const int MANUAL_REFRESH_COOLDOWN = 5; // 5 秒冷卻時間
+        private volatile bool _isManualRefreshing = false;
 
         private DebugWindow _debugWindow;
         private bool _isSkEventsRegistered;
@@ -780,7 +781,9 @@ namespace StockManager
                 // 更新 UI 顯示
                 Dispatcher.Invoke(() =>
                 {
+                    btnRefresh.IsEnabled = false;
                     UpdatePriceDisplay(true);
+                    btnRefresh.IsEnabled = true;
                     progressBar.Value = 0;
                     statusText.Text = $"✅ 預載完成 - 美股 {usSuccessCount}/{usTickers.Count}, 台股 {twSuccessCount}/{twTickers.Count}";
                 });
@@ -800,6 +803,11 @@ namespace StockManager
 
         private void UpdateTimer_Tick(object sender, EventArgs e)
         {
+            if (_isManualRefreshing)
+            {
+                return;
+            }
+
             UpdatePriceDisplay();
         }
 
@@ -997,8 +1005,6 @@ namespace StockManager
             {
                 if (!stock.Price.HasValue)
                 {
-                    stock.TrendScore = null;
-                    stock.BuySellSuggestion = "--";
                     continue;
                 }
 
@@ -2315,6 +2321,12 @@ namespace StockManager
 
         private void BtnRefresh_Click(object sender, RoutedEventArgs e)
         {
+            if (_isManualRefreshing)
+            {
+                statusText.Text = "⏳ 手動刷新進行中，請稍候";
+                return;
+            }
+
             // 檢查冷卻時間
             var now = DateTime.Now;
             var timeSinceLastRefresh = (now - _lastManualRefresh).TotalSeconds;
@@ -2330,64 +2342,86 @@ namespace StockManager
             // 更新最後刷新時間
             _lastManualRefresh = now;
             _countdownSeconds = 0;
+            _isManualRefreshing = true;
+            _usMonitor?.Pause();
+            _twMonitor?.Pause();
             statusText.Text = "🔄 手動刷新中...";
             Console.WriteLine($"[手動刷新] 開始刷新，下次可刷新時間: {_lastManualRefresh.AddSeconds(MANUAL_REFRESH_COOLDOWN):HH:mm:ss}");
 
             Task.Run(() =>
             {
-                var currentTab = marketTabControl.Dispatcher.Invoke(() => marketTabControl.SelectedIndex);
-
-                if (currentTab == 0)
+                try
                 {
-                    var tickers = _usStockManager.GetTickers();
-                    Console.WriteLine($"[手動刷新] 美股：開始更新 {tickers.Count} 個股票");
+                    var currentTab = marketTabControl.Dispatcher.Invoke(() => marketTabControl.SelectedIndex);
 
-                    for (int i = 0; i < tickers.Count; i++)
+                    if (currentTab == 0)
                     {
-                        var ticker = tickers[i];
-                        Console.WriteLine($"[手動刷新] 美股 [{i + 1}/{tickers.Count}] 更新 {ticker}");
+                        var tickers = _usStockManager.GetTickers();
+                        Console.WriteLine($"[手動刷新] 美股：開始更新 {tickers.Count} 個股票");
 
-                        // 使用新方法：獲取價格和前收盤價
-                        _usPriceFetcher.UpdatePriceWithPreviousClose(ticker);
-
-                        // 添加請求間隔，避免頻率過高
-                        if (i < tickers.Count - 1) // 最後一個不需要等待
+                        for (int i = 0; i < tickers.Count; i++)
                         {
-                            System.Threading.Thread.Sleep(600);
-                        }
-                    }
+                            var ticker = tickers[i];
+                            Console.WriteLine($"[手動刷新] 美股 [{i + 1}/{tickers.Count}] 更新 {ticker}");
 
-                    Console.WriteLine($"[手動刷新] 美股：完成更新 {tickers.Count} 個股票");
-                }
-                else
-                {
-                    var tickers = _twStockManager.GetTickers();
-                    Console.WriteLine($"[手動刷新] 台股：開始更新 {tickers.Count} 個股票");
+                            // 使用新方法：獲取價格和前收盤價
+                            _usPriceFetcher.UpdatePriceWithPreviousClose(ticker);
 
-                    for (int i = 0; i < tickers.Count; i++)
-                    {
-                        var ticker = tickers[i];
-                        Console.WriteLine($"[手動刷新] 台股 [{i + 1}/{tickers.Count}] 更新 {ticker}");
-
-                        // 使用新方法：獲取價格和前收盤價
-                        _twPriceFetcher.UpdatePriceWithPreviousClose(ticker);
-
-                        // 添加請求間隔，避免頻率過高
-                        if (i < tickers.Count - 1)
-                        {
-                            System.Threading.Thread.Sleep(600);
-                        }
-                    }
-
-                    Console.WriteLine($"[手動刷新] 台股：完成更新 {tickers.Count} 個股票");
-                }
-
-                Dispatcher.Invoke(() =>
+                            // 添加請求間隔，避免頻率過高
+                            if (i < tickers.Count - 1) // 最後一個不需要等待
                             {
+                                System.Threading.Thread.Sleep(600);
+                            }
+                        }
+
+                        Console.WriteLine($"[手動刷新] 美股：完成更新 {tickers.Count} 個股票");
+                    }
+                    else
+                    {
+                        var tickers = _twStockManager.GetTickers();
+                        Console.WriteLine($"[手動刷新] 台股：開始更新 {tickers.Count} 個股票");
+
+                        for (int i = 0; i < tickers.Count; i++)
+                        {
+                            var ticker = tickers[i];
+                            Console.WriteLine($"[手動刷新] 台股 [{i + 1}/{tickers.Count}] 更新 {ticker}");
+
+                            // 使用新方法：獲取價格和前收盤價
+                            _twPriceFetcher.UpdatePriceWithPreviousClose(ticker);
+
+                            // 添加請求間隔，避免頻率過高
+                            if (i < tickers.Count - 1)
+                            {
+                                System.Threading.Thread.Sleep(600);
+                            }
+                        }
+
+                        Console.WriteLine($"[手動刷新] 台股：完成更新 {tickers.Count} 個股票");
+                    }
+                    Dispatcher.Invoke(() =>
+                    {
+                        btnRefresh.IsEnabled = false;
                         UpdatePriceDisplay(true);
+                        btnRefresh.IsEnabled = true;
                         statusText.Text = "✅ 刷新完成";
                         Console.WriteLine($"[手動刷新] 刷新完成，下次可刷新時間: {DateTime.Now.AddSeconds(MANUAL_REFRESH_COOLDOWN):HH:mm:ss}");
                     });
+
+                }
+                catch (Exception ex)
+                {
+                    Dispatcher.Invoke(() =>
+                    {
+                        statusText.Text = "❌ 手動刷新失敗";
+                    });
+                    Console.WriteLine($"[手動刷新失敗] {ex.Message}");
+                }
+                finally
+                {
+                    _usMonitor?.Resume();
+                    _twMonitor?.Resume();
+                    _isManualRefreshing = false;
+                }
             });
         }
 
