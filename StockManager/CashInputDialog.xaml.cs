@@ -7,18 +7,6 @@ namespace StockManager
     {
         public double CashAmount { get; private set; }
 
-        public CashInputDialog(string title, double currentAmount)
-        {
-            InitializeComponent();
-            Title = title;
-            txtCashAmount.Text = currentAmount.ToString("F2", CultureInfo.InvariantCulture);
-            Loaded += (s, e) =>
-            {
-                txtCashAmount.Focus();
-                txtCashAmount.SelectAll();
-            };
-        }
-
         private void BtnOk_Click(object sender, RoutedEventArgs e)
         {
             var text = (txtCashAmount.Text ?? string.Empty).Trim();

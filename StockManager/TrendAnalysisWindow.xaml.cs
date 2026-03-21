@@ -1,9 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
-using System.Diagnostics;
 using System.Globalization;
-using System.IO;
 using System.Linq;
 using System.Net;
 using System.Text.RegularExpressions;
@@ -23,7 +20,7 @@ namespace StockManager
         {
                 private string _ticker;
                 private string _stockName;
-                private PriceFetcherService _priceFetcher;
+                private IMarketDataGateway _priceFetcher;
                 private string _currentPeriod = "3mo";
                 private bool _isLoaded = false; // 標記視窗是否已完全載入
                 private List<CandlestickData> _historicalData = new List<CandlestickData>();
@@ -41,9 +38,8 @@ namespace StockManager
                 private bool _isRealtimeKLineMode;
                 private bool _isRealtimeKLineRefreshing;
                 private double? _lastDisplayedPrice;
-                private readonly Func<string, Tuple<double?, double?, DateTime?>> _twSkQuoteProvider;
 
-                public TrendAnalysisWindow(string ticker, string stockName, PriceFetcherService priceFetcher, Func<string, Tuple<double?, double?, DateTime?>> twSkQuoteProvider = null)
+                public TrendAnalysisWindow(string ticker, string stockName, IMarketDataGateway priceFetcher)
                 {
                         try
                         {
@@ -56,7 +52,6 @@ namespace StockManager
                                 _ticker = ticker;
                                 _stockName = stockName;
                                 _priceFetcher = priceFetcher;
-                                _twSkQuoteProvider = twSkQuoteProvider;
 
                                 Console.WriteLine($"[趨勢視窗] 設定參數完成");
 
@@ -944,7 +939,7 @@ namespace StockManager
                         changePercent = null;
                         quoteAt = null;
 
-                        if (_twSkQuoteProvider == null || string.IsNullOrWhiteSpace(ticker) || !IsTwTicker(ticker))
+                        if (_priceFetcher == null || string.IsNullOrWhiteSpace(ticker) || !IsTwTicker(ticker))
                         {
                                 return null;
                         }
@@ -952,7 +947,7 @@ namespace StockManager
                         try
                         {
                                 var normalizedTicker = NormalizeTwTickerForSkQuote(ticker);
-                                var quote = _twSkQuoteProvider(normalizedTicker);
+                                var quote = _priceFetcher.GetRealtimeTwQuote(normalizedTicker);
                                 if (quote == null)
                                 {
                                         return null;
@@ -2150,131 +2145,51 @@ namespace StockManager
                 {
                         try
                         {
-                                var exePath = ResolveYFinanceExecutablePath();
-                                var scriptPath = ResolveYFinanceScriptPath();
-
-                                var hasExe = File.Exists(exePath);
-                                var hasScript = File.Exists(scriptPath);
-                                if (!hasExe && !hasScript)
+                                if (_priceFetcher == null)
                                 {
-                                        Console.WriteLine($"[趨勢視窗] 找不到 yfinance 執行檔或腳本。EXE={exePath}, Script={scriptPath}");
                                         return false;
                                 }
 
-                                var startInfo = new ProcessStartInfo
+                                List<MarketHistoryBar> bars;
+                                if (!_priceFetcher.TryGetHistoricalData(ticker, period, interval, out bars) || bars == null || bars.Count == 0)
                                 {
-                                        FileName = hasExe ? exePath : AppConfig.PythonPath,
-                                        Arguments = hasExe ? $"{ticker} history {period} {interval}" : $"\"{scriptPath}\" {ticker} history {period} {interval}",
-                                        UseShellExecute = false,
-                                        RedirectStandardOutput = true,
-                                        RedirectStandardError = true,
-                                        CreateNoWindow = true,
-                                        StandardOutputEncoding = System.Text.Encoding.UTF8
-                                };
-
-                                using (var process = new Process { StartInfo = startInfo })
-                                {
-                                        process.Start();
-                                        var output = process.StandardOutput.ReadToEnd();
-                                        var error = process.StandardError.ReadToEnd();
-                                        process.WaitForExit(15000);
-
-                                        if (!string.IsNullOrWhiteSpace(error))
-                                        {
-                                                Console.WriteLine($"[趨勢視窗] yfinance history 錯誤: {error}");
-                                        }
-
-                                        var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-                                        if (lines.Length == 0 || lines[0] != "HISTORY_OK")
-                                        {
-                                                Console.WriteLine("[趨勢視窗] yfinance history 無有效輸出");
-                                                return false;
-                                        }
-
-                                        target.Clear();
-                                        for (int i = 1; i < lines.Length; i++)
-                                        {
-                                                var parts = lines[i].Split('|');
-                                                if (parts.Length < 6)
-                                                {
-                                                        continue;
-                                                }
-
-                                                DateTime date;
-                                                double open, high, low, close;
-                                                long volume;
-
-                                                if (!DateTime.TryParse(parts[0], out date) ||
-                                                    !double.TryParse(parts[1], NumberStyles.Any, CultureInfo.InvariantCulture, out open) ||
-                                                    !double.TryParse(parts[2], NumberStyles.Any, CultureInfo.InvariantCulture, out high) ||
-                                                    !double.TryParse(parts[3], NumberStyles.Any, CultureInfo.InvariantCulture, out low) ||
-                                                    !double.TryParse(parts[4], NumberStyles.Any, CultureInfo.InvariantCulture, out close) ||
-                                                    !long.TryParse(parts[5], NumberStyles.Any, CultureInfo.InvariantCulture, out volume))
-                                                {
-                                                        continue;
-                                                }
-
-                                                var changeAmount = close - open;
-                                                var changePercent = open != 0 ? (changeAmount / open) * 100 : 0;
-
-                                                target.Add(new CandlestickData
-                                                {
-                                                        Date = string.Equals(interval, "5m", StringComparison.OrdinalIgnoreCase)
-                                                                ? date.ToString("MM/dd HH:mm")
-                                                                : date.ToString("MM/dd"),
-                                                        Open = open,
-                                                        High = high,
-                                                        Low = low,
-                                                        Close = close,
-                                                        Volume = volume,
-                                                        ChangeAmount = changeAmount,
-                                                        ChangePercent = changePercent
-                                                });
-                                        }
-
-                                        return target.Count > 0;
+                                        return false;
                                 }
+
+                                target.Clear();
+                                foreach (var bar in bars)
+                                {
+                                        DateTime date;
+                                        if (!DateTime.TryParse(bar.DateText, out date))
+                                        {
+                                                continue;
+                                        }
+
+                                        var changeAmount = bar.Close - bar.Open;
+                                        var changePercent = Math.Abs(bar.Open) > 0.000001 ? (changeAmount / bar.Open) * 100 : 0;
+
+                                        target.Add(new CandlestickData
+                                        {
+                                                Date = string.Equals(interval, "5m", StringComparison.OrdinalIgnoreCase)
+                                                        ? date.ToString("MM/dd HH:mm")
+                                                        : date.ToString("MM/dd"),
+                                                Open = bar.Open,
+                                                High = bar.High,
+                                                Low = bar.Low,
+                                                Close = bar.Close,
+                                                Volume = bar.Volume,
+                                                ChangeAmount = changeAmount,
+                                                ChangePercent = changePercent
+                                        });
+                                }
+
+                                return target.Count > 0;
                         }
                         catch (Exception ex)
                         {
                                 Console.WriteLine($"[趨勢視窗] 讀取 yfinance 歷史資料失敗: {ex.Message}");
                                 return false;
                         }
-                }
-
-                private string ResolveYFinanceExecutablePath()
-                {
-                        var baseDir = AppDomain.CurrentDomain.BaseDirectory;
-                        var candidates = new[]
-                        {
-                                System.IO.Path.Combine(baseDir, "Python", "yfinance_fetcher.exe"),
-                                System.IO.Path.GetFullPath(System.IO.Path.Combine(baseDir, "..", "Python", "yfinance_fetcher.exe")),
-                                System.IO.Path.GetFullPath(System.IO.Path.Combine(baseDir, "..", "..", "Python", "yfinance_fetcher.exe")),
-                                System.IO.Path.GetFullPath(System.IO.Path.Combine(baseDir, "..", "..", "..", "Python", "yfinance_fetcher.exe")),
-                                System.IO.Path.GetFullPath(System.IO.Path.Combine(baseDir, "..", "..", "..", "Python", "dist", "yfinance_fetcher.exe")),
-                                System.IO.Path.GetFullPath(System.IO.Path.Combine(baseDir, "..", "..", "..", "..", "Python", "dist", "yfinance_fetcher.exe")),
-                                System.IO.Path.GetFullPath(System.IO.Path.Combine(baseDir, "..", "..", "..", "..", "Installer", "staging", "Python", "yfinance_fetcher.exe"))
-                        };
-
-                        var existing = candidates.FirstOrDefault(File.Exists);
-                        return existing ?? candidates[0];
-                }
-
-                private string ResolveYFinanceScriptPath()
-                {
-                        var baseDir = AppDomain.CurrentDomain.BaseDirectory;
-                        var candidates = new[]
-                        {
-                                System.IO.Path.Combine(baseDir, AppConfig.YFinanceScriptPath),
-                                System.IO.Path.GetFullPath(System.IO.Path.Combine(baseDir, "..", AppConfig.YFinanceScriptPath)),
-                                System.IO.Path.GetFullPath(System.IO.Path.Combine(baseDir, "..", "..", AppConfig.YFinanceScriptPath)),
-                                System.IO.Path.GetFullPath(System.IO.Path.Combine(baseDir, "..", "..", "..", AppConfig.YFinanceScriptPath)),
-                                System.IO.Path.GetFullPath(System.IO.Path.Combine(baseDir, "..", "..", "..", "..", AppConfig.YFinanceScriptPath)),
-                                System.IO.Path.GetFullPath(System.IO.Path.Combine(baseDir, "..", "..", "..", "..", "Installer", "staging", "Python", "yfinance_fetcher.py"))
-                        };
-
-                        var existing = candidates.FirstOrDefault(File.Exists);
-                        return existing ?? candidates[0];
                 }
 
                 private void UpdateFundamentalAnalysis()
@@ -2286,59 +2201,12 @@ namespace StockManager
 
                         try
                         {
-                                var scriptPath = ResolveYFinanceScriptPath();
-
-                                if (!File.Exists(scriptPath))
+                                Dictionary<string, double> metrics;
+                                if (_priceFetcher == null || !_priceFetcher.TryGetFundamentals(_ticker, out metrics))
                                 {
-                                        txtFundamentalAnalysis.Text = "無法載入財報分析：找不到 yfinance 腳本。";
+                                        txtFundamentalAnalysis.Text = "目前無法取得完整財報資料，請稍後再試。";
                                         return;
                                 }
-
-                                var startInfo = new ProcessStartInfo
-                                {
-                                        FileName = AppConfig.PythonPath,
-                                        Arguments = $"\"{scriptPath}\" {_ticker} fundamentals",
-                                        UseShellExecute = false,
-                                        RedirectStandardOutput = true,
-                                        RedirectStandardError = true,
-                                        CreateNoWindow = true,
-                                        StandardOutputEncoding = System.Text.Encoding.UTF8
-                                };
-
-                                using (var process = new Process { StartInfo = startInfo })
-                                {
-                                        process.Start();
-                                        var output = process.StandardOutput.ReadToEnd();
-                                        var error = process.StandardError.ReadToEnd();
-                                        process.WaitForExit(15000);
-
-                                        if (!string.IsNullOrWhiteSpace(error))
-                                        {
-                                                Console.WriteLine($"[財報分析] yfinance 錯誤: {error}");
-                                        }
-
-                                        var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-                                        if (lines.Length == 0 || lines[0] != "FUNDAMENTALS_OK")
-                                        {
-                                                txtFundamentalAnalysis.Text = "目前無法取得完整財報資料，請稍後再試。";
-                                                return;
-                                        }
-
-                                        var metrics = new Dictionary<string, double>();
-                                        for (int i = 1; i < lines.Length; i++)
-                                        {
-                                                var parts = lines[i].Split('|');
-                                                if (parts.Length != 2)
-                                                {
-                                                        continue;
-                                                }
-
-                                                double value;
-                                                if (double.TryParse(parts[1], NumberStyles.Any, CultureInfo.InvariantCulture, out value))
-                                                {
-                                                        metrics[parts[0]] = value;
-                                                }
-                                        }
 
                                         var reasons = new List<string>();
                                         var metricDetails = new List<string>();
@@ -2499,7 +2367,6 @@ namespace StockManager
                                                 string.Join("\n", metricDetails.Select(m => $"• {m}")) +
                                                 "\n\n【建議原因】\n" +
                                                 string.Join("\n", reasons.Select(r => $"• {r}"));
-                                }
                         }
                         catch (Exception ex)
                         {

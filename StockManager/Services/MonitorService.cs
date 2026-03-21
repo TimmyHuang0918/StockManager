@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Threading;
 
 namespace StockManager.Services
@@ -7,12 +6,12 @@ namespace StockManager.Services
         public class MonitorService
         {
                 private readonly StockManagerService _stockManager;
-                private readonly PriceFetcherService _priceFetcher;
+                private readonly IMarketDataGateway _priceFetcher;
                 private Thread _priceThread;
                 private bool _running;
                 private int _interval = 10;
 
-                public MonitorService(StockManagerService stockManager, PriceFetcherService priceFetcher)
+                public MonitorService(StockManagerService stockManager, IMarketDataGateway priceFetcher)
                 {
                         _stockManager = stockManager;
                         _priceFetcher = priceFetcher;

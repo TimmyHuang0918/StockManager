@@ -1,12 +1,10 @@
 ﻿using SKCOMLib;
 using SKDLLCSharp;
 using StockManager.Config;
-using StockManager.Models;
 using StockManager.Services;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -19,13 +17,8 @@ using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Data;
-using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using System.Windows.Navigation;
-using System.Windows.Shapes;
 using System.Windows.Threading;
 using System.Xml.Linq;
 using StockInfo = StockManager.Models.StockInfo;
@@ -39,8 +32,8 @@ namespace StockManager
     {
         private StockManagerService _usStockManager;
         private StockManagerService _twStockManager;
-        private PriceFetcherService _usPriceFetcher;
-        private PriceFetcherService _twPriceFetcher;
+        private IMarketDataGateway _usPriceFetcher;
+        private IMarketDataGateway _twPriceFetcher;
         private MonitorService _usMonitor;
         private MonitorService _twMonitor;
 
@@ -72,20 +65,17 @@ namespace StockManager
         private const int MANUAL_REFRESH_COOLDOWN = 5; // 5 秒冷卻時間
 
         private DebugWindow _debugWindow;
+        private bool _isSkEventsRegistered;
+	    private bool _isCapitalLoggedIn;
+	    private readonly object _skTwQuoteLock = new object();
+	    private Dictionary<string, Tuple<double?, double?, double?, DateTime>> _twSkQuoteCache = new Dictionary<string, Tuple<double?, double?, double?, DateTime>>(StringComparer.OrdinalIgnoreCase);
+	    private readonly HashSet<string> _skSubscribedTwStocks = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+	    private DateTime _lastSkQuoteReceivedAt = DateTime.MinValue;
+	    private DateTime _lastSkResubscribeAt = DateTime.MinValue;
+	    private volatile bool _isSkSectorBatchUpdating = false;
+	    private readonly string _capitalCredentialFile = System.IO.Path.Combine(AppConfig.UserConfigDir, "capital_login_credential.dat");
 
-	private static SKCenterLib _skCenter;
-	private static SKQuoteLib _skQuote;
-	private bool _isSkEventsRegistered;
-	private bool _isCapitalLoggedIn;
-	private readonly object _skTwQuoteLock = new object();
-	private Dictionary<string, Tuple<double?, double?, double?, DateTime>> _twSkQuoteCache = new Dictionary<string, Tuple<double?, double?, double?, DateTime>>(StringComparer.OrdinalIgnoreCase);
-	private readonly HashSet<string> _skSubscribedTwStocks = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-	private DateTime _lastSkQuoteReceivedAt = DateTime.MinValue;
-	private DateTime _lastSkResubscribeAt = DateTime.MinValue;
-	private volatile bool _isSkSectorBatchUpdating = false;
-	private readonly string _capitalCredentialFile = System.IO.Path.Combine(AppConfig.UserConfigDir, "capital_login_credential.dat");
-
-	public MainWindow()
+        public MainWindow()
         {
             InitializeComponent();
             StateChanged += MainWindow_StateChanged;
@@ -310,12 +300,12 @@ namespace StockManager
         {
             // 初始化美股服務
             _usStockManager = new StockManagerService(AppConfig.DefaultStocks, AppConfig.UserStocksFile);
-            _usPriceFetcher = new PriceFetcherService();
+            _usPriceFetcher = new CompositeMarketDataGateway(new PriceFetcherService());
             _usMonitor = new MonitorService(_usStockManager, _usPriceFetcher);
 
             // 初始化台股服務
             _twStockManager = new StockManagerService(AppConfig.DefaultTwStocks, AppConfig.UserTwStocksFile);
-            _twPriceFetcher = new PriceFetcherService();
+            _twPriceFetcher = new CompositeMarketDataGateway(new PriceFetcherService(), TryGetLatestTwSkQuote, () => _isCapitalLoggedIn);
             _twMonitor = new MonitorService(_twStockManager, _twPriceFetcher);
         }
 
@@ -2346,8 +2336,7 @@ namespace StockManager
                         var trendWindow = new TrendAnalysisWindow(
                                 selectedStock.Ticker,
                                 selectedStock.Name,
-                                priceFetcher,
-                                TryGetLatestTwSkQuote
+                                priceFetcher
                         );
                         trendWindow.Owner = this;
                         Console.WriteLine($"[雙擊] 準備顯示趨勢視窗");
@@ -2415,6 +2404,11 @@ namespace StockManager
 	{
 	    return TryGetLatestTwSkQuote(ticker);
 	}
+
+        public IMarketDataGateway GetTwMarketDataGatewayForTrend()
+        {
+            return _twPriceFetcher;
+        }
 
         private void BtnDebug_Click(object sender, RoutedEventArgs e)
         {

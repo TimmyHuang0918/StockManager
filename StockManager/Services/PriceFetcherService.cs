@@ -2,13 +2,12 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
-using System.Threading;
 using System.Diagnostics;
 using StockManager.Config;
 
 namespace StockManager.Services
 {
-        public class PriceFetcherService
+        public class PriceFetcherService : IMarketDataGateway
         {
                 private readonly object _lock = new object();
                 private Dictionary<string, Tuple<double?, double?>> _latestPrices = new Dictionary<string, Tuple<double?, double?>>();
@@ -372,12 +371,17 @@ namespace StockManager.Services
                 /// </summary>
                 private ProcessStartInfo CreateYFinanceProcessStartInfo(string ticker, string exePath, string scriptPath)
                 {
+                        return CreateYFinanceCommandProcessStartInfo(exePath, scriptPath, ticker);
+                }
+
+                private ProcessStartInfo CreateYFinanceCommandProcessStartInfo(string exePath, string scriptPath, string arguments)
+                {
                         if (File.Exists(exePath))
                         {
                                 return new ProcessStartInfo
                                 {
                                         FileName = exePath,
-                                        Arguments = ticker,
+                                        Arguments = arguments,
                                         UseShellExecute = false,
                                         RedirectStandardOutput = true,
                                         RedirectStandardError = true,
@@ -389,7 +393,7 @@ namespace StockManager.Services
                         return new ProcessStartInfo
                         {
                                 FileName = AppConfig.PythonPath,
-                                Arguments = $"\"{scriptPath}\" {ticker}",
+                                Arguments = $"\"{scriptPath}\" {arguments}",
                                 UseShellExecute = false,
                                 RedirectStandardOutput = true,
                                 RedirectStandardError = true,
@@ -449,6 +453,145 @@ namespace StockManager.Services
                         return fallbackPath;
                 }
 
+                public bool TryGetHistoricalData(string ticker, string period, string interval, out List<MarketHistoryBar> bars)
+                {
+                        bars = new List<MarketHistoryBar>();
+
+                        try
+                        {
+                                var exePath = ResolveYFinanceExecutablePath();
+                                var scriptPath = ResolveYFinanceScriptPath();
+
+                                if (!File.Exists(exePath) && !File.Exists(scriptPath))
+                                {
+                                        return false;
+                                }
+
+                                var arguments = $"{ticker} history {period} {interval}";
+                                var startInfo = CreateYFinanceCommandProcessStartInfo(exePath, scriptPath, arguments);
+
+                                using (var process = new Process { StartInfo = startInfo })
+                                {
+                                        process.Start();
+                                        var output = process.StandardOutput.ReadToEnd();
+                                        var error = process.StandardError.ReadToEnd();
+                                        process.WaitForExit(15000);
+
+                                        if (!string.IsNullOrWhiteSpace(error))
+                                        {
+                                                Console.WriteLine($"[yfinance history] {ticker} 錯誤: {error}");
+                                        }
+
+                                        var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                                        if (lines.Length == 0 || lines[0] != "HISTORY_OK")
+                                        {
+                                                return false;
+                                        }
+
+                                        for (int i = 1; i < lines.Length; i++)
+                                        {
+                                                var parts = lines[i].Split('|');
+                                                if (parts.Length < 6)
+                                                {
+                                                        continue;
+                                                }
+
+                                                double open;
+                                                double high;
+                                                double low;
+                                                double close;
+                                                long volume;
+
+                                                if (!double.TryParse(parts[1], System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out open) ||
+                                                        !double.TryParse(parts[2], System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out high) ||
+                                                        !double.TryParse(parts[3], System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out low) ||
+                                                        !double.TryParse(parts[4], System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out close) ||
+                                                        !long.TryParse(parts[5], System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out volume))
+                                                {
+                                                        continue;
+                                                }
+
+                                                bars.Add(new MarketHistoryBar
+                                                {
+                                                        DateText = parts[0],
+                                                        Open = open,
+                                                        High = high,
+                                                        Low = low,
+                                                        Close = close,
+                                                        Volume = volume
+                                                });
+                                        }
+                                }
+
+                                return bars.Count > 0;
+                        }
+                        catch (Exception ex)
+                        {
+                                Console.WriteLine($"[yfinance history] {ticker} 失敗: {ex.Message}");
+                                return false;
+                        }
+                }
+
+                public bool TryGetFundamentals(string ticker, out Dictionary<string, double> metrics)
+                {
+                        metrics = new Dictionary<string, double>();
+
+                        try
+                        {
+                                var exePath = ResolveYFinanceExecutablePath();
+                                var scriptPath = ResolveYFinanceScriptPath();
+
+                                if (!File.Exists(exePath) && !File.Exists(scriptPath))
+                                {
+                                        return false;
+                                }
+
+                                var arguments = $"{ticker} fundamentals";
+                                var startInfo = CreateYFinanceCommandProcessStartInfo(exePath, scriptPath, arguments);
+
+                                using (var process = new Process { StartInfo = startInfo })
+                                {
+                                        process.Start();
+                                        var output = process.StandardOutput.ReadToEnd();
+                                        var error = process.StandardError.ReadToEnd();
+                                        process.WaitForExit(15000);
+
+                                        if (!string.IsNullOrWhiteSpace(error))
+                                        {
+                                                Console.WriteLine($"[yfinance fundamentals] {ticker} 錯誤: {error}");
+                                        }
+
+                                        var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                                        if (lines.Length == 0 || lines[0] != "FUNDAMENTALS_OK")
+                                        {
+                                                return false;
+                                        }
+
+                                        for (int i = 1; i < lines.Length; i++)
+                                        {
+                                                var parts = lines[i].Split('|');
+                                                if (parts.Length != 2)
+                                                {
+                                                        continue;
+                                                }
+
+                                                double value;
+                                                if (double.TryParse(parts[1], System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out value))
+                                                {
+                                                        metrics[parts[0]] = value;
+                                                }
+                                        }
+                                }
+
+                                return true;
+                        }
+                        catch (Exception ex)
+                        {
+                                Console.WriteLine($"[yfinance fundamentals] {ticker} 失敗: {ex.Message}");
+                                return false;
+                        }
+                }
+
                 public Dictionary<string, Tuple<double?, double?>> GetPrices()
                 {
                         lock (_lock)
@@ -480,6 +623,11 @@ namespace StockManager.Services
                                 Console.WriteLine($"[緩存] {ticker}: 無緩存數據");
                                 return Tuple.Create<double?, double?>(null, null);
                         }
+                }
+
+                public Tuple<double?, double?, DateTime?> GetRealtimeTwQuote(string ticker)
+                {
+                        return null;
                 }
         }
 }

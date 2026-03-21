@@ -46,7 +46,7 @@ namespace StockManager
         private DateTime? _lastYFinanceCacheUpdatedAt;
         private bool _loadedFromCsv;
         private string _noPriceSummary = string.Empty;
-        private readonly PriceFetcherService _trendPriceFetcher = new PriceFetcherService();
+        private readonly IMarketDataGateway _trendPriceFetcher = new CompositeMarketDataGateway(new PriceFetcherService());
 
         public TwStockFilterWindow()
         {
@@ -103,13 +103,9 @@ namespace StockManager
                 }
 
                 var host = Window.GetWindow(this) as MainWindow;
-                Func<string, Tuple<double?, double?, DateTime?>> skQuoteProvider = null;
-                if (host != null)
-                {
-                    skQuoteProvider = host.GetLatestTwSkQuoteForTrend;
-                }
+                var marketDataGateway = host != null ? host.GetTwMarketDataGatewayForTrend() : _trendPriceFetcher;
 
-                var trendWindow = new TrendAnalysisWindow(trendTicker, selected.Name, _trendPriceFetcher, skQuoteProvider)
+                var trendWindow = new TrendAnalysisWindow(trendTicker, selected.Name, marketDataGateway)
                 {
                     Owner = host
                 };
@@ -413,11 +409,7 @@ namespace StockManager
         private void ShowSectorStockDetails(string sectorName, List<SectorSampleItem> sectorStocks)
         {
             var hostMainWindow = Window.GetWindow(this) as MainWindow;
-            Func<string, Tuple<double?, double?, DateTime?>> skQuoteProvider = null;
-            if (hostMainWindow != null)
-            {
-                skQuoteProvider = hostMainWindow.GetLatestTwSkQuoteForTrend;
-            }
+            var marketDataGateway = hostMainWindow != null ? hostMainWindow.GetTwMarketDataGatewayForTrend() : _trendPriceFetcher;
 
             var stockLookup = _sourceStocks.ToDictionary(x => x.Ticker, StringComparer.OrdinalIgnoreCase);
             var detailItems = new List<SectorStockDetailItem>();
@@ -1126,7 +1118,7 @@ namespace StockManager
                 isRealtimeRefreshing = true;
                 try
                 {
-                    await System.Threading.Tasks.Task.Run(() => RefreshSectorStockRealtimePrices(sorted, null, skQuoteProvider));
+                    await System.Threading.Tasks.Task.Run(() => RefreshSectorStockRealtimePrices(sorted, null, marketDataGateway));
                     sorted.Sort((a, b) =>
                     {
                         var changeCompare = Nullable.Compare(b.ChangePercent, a.ChangePercent);
@@ -1192,7 +1184,7 @@ namespace StockManager
                         progressBar.Value = percent;
                         progressTextBlock.Text = $"即時更新進度：{current}/{total}";
                     }));
-                }, skQuoteProvider));
+                }, marketDataGateway));
 
                 if (!detailWindow.IsLoaded)
                 {
@@ -2078,7 +2070,7 @@ namespace StockManager
             return "yfinance";
         }
 
-        private void RefreshSectorStockRealtimePrices(List<SectorStockDetailItem> stocks, Action<int, int> onProgress, Func<string, Tuple<double?, double?, DateTime?>> skQuoteProvider)
+        private void RefreshSectorStockRealtimePrices(List<SectorStockDetailItem> stocks, Action<int, int> onProgress, IMarketDataGateway marketDataGateway)
         {
             try
             {
@@ -2088,7 +2080,7 @@ namespace StockManager
                     return;
                 }
 
-                var priceFetcher = new PriceFetcherService();
+                var priceFetcher = marketDataGateway ?? _trendPriceFetcher;
                 var tickerMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var stock in stocks)
                 {
@@ -2112,7 +2104,7 @@ namespace StockManager
 
                 var unresolvedTickers = new HashSet<string>(distinctTickers, StringComparer.OrdinalIgnoreCase);
 
-                if (skQuoteProvider != null)
+                if (priceFetcher != null)
                 {
                     foreach (var stock in stocks)
                     {
@@ -2122,7 +2114,7 @@ namespace StockManager
                             continue;
                         }
 
-                        var quote = skQuoteProvider(normalizedTicker);
+                        var quote = priceFetcher.GetRealtimeTwQuote(normalizedTicker);
                         if (quote == null || !quote.Item1.HasValue)
                         {
                             continue;

@@ -91,7 +91,8 @@
     <Compile Include="Config\TaiwanSectorConfigData.cs" />
     <Compile Include="Converters\PositiveNegativeConverter.cs" />
     <Compile Include="DebugWindow.xaml.cs" />
-    <Compile Include="DiagnosePreviousClose.cs" />
+    <Compile Include="Services\CompositeMarketDataGateway.cs" />
+    <Compile Include="Services\IMarketDataGateway.cs" />
     <Compile Include="Services\MonitorService.cs" />
     <Compile Include="Services\PriceFetcherService.cs" />
     <Compile Include="Services\StockManagerService.cs" />
