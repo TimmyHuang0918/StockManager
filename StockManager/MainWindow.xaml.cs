@@ -2522,36 +2522,36 @@ namespace StockManager
 
 	    SK.OnReplyMessage += (strLoginID, strMessage) =>
 	    {
-		Console.WriteLine($"[OnReplyMessage] {strLoginID}: {strMessage}");
+		    Console.WriteLine($"[OnReplyMessage] {strLoginID}: {strMessage}");
 	    };
 
 	    SK.OnConnection += (loginID, code) =>
 	    {
-		Console.WriteLine($"[OnConnection] {loginID}, Code={code}");
+		    Console.WriteLine($"[OnConnection] {loginID}, Code={code}");
 	    };
 
 	    SK.OnNotifyQuoteLONG += (nMarketNo, strStockNo) =>
 	    {
-		var pSKStockLONG = SK.SKQuoteLib_GetStockByStockNo(nMarketNo, strStockNo);
-		if (pSKStockLONG.nCode == 0)
-		{
-		    var ticker = NormalizeTwTickerForUi(strStockNo);
-		    var close = TryGetScaledSkPrice(pSKStockLONG, pSKStockLONG.nClose);
-		    var prevClose = TryGetScaledSkPrice(pSKStockLONG, (int)(TryGetSkNumericField(pSKStockLONG, "nRef") ?? 0));
-		    double? changePercent = null;
-		    if (close.HasValue && prevClose.HasValue && Math.Abs(prevClose.Value) > 0.000001)
+		    var pSKStockLONG = SK.SKQuoteLib_GetStockByStockNo(nMarketNo, strStockNo);
+		    if (pSKStockLONG.nCode == 0)
 		    {
-			changePercent = (close.Value - prevClose.Value) / prevClose.Value * 100;
-		    }
+		        var ticker = NormalizeTwTickerForUi(strStockNo);
+		        var close = TryGetScaledSkPrice(pSKStockLONG, pSKStockLONG.nClose);
+		        var prevClose = TryGetScaledSkPrice(pSKStockLONG, (int)(TryGetSkNumericField(pSKStockLONG, "nRef") ?? 0));
+		        double? changePercent = null;
+		        if (close.HasValue && prevClose.HasValue && Math.Abs(prevClose.Value) > 0.000001)
+		        {
+			    changePercent = (close.Value - prevClose.Value) / prevClose.Value * 100;
+		        }
 
-		    lock (_skTwQuoteLock)
-		    {
-			_twSkQuoteCache[ticker] = Tuple.Create(close, prevClose, changePercent, DateTime.Now);
-			_lastSkQuoteReceivedAt = DateTime.Now;
-		    }
+		        lock (_skTwQuoteLock)
+		        {
+			    _twSkQuoteCache[ticker] = Tuple.Create(close, prevClose, changePercent, DateTime.Now);
+			    _lastSkQuoteReceivedAt = DateTime.Now;
+		        }
 
-		    Console.WriteLine($"[SK即時] {ticker} 成交={close?.ToString("F2") ?? "N/A"} 漲跌={changePercent?.ToString("F2") ?? "N/A"}%");
-		}
+		        Console.WriteLine($"[SK即時] {ticker} 成交={close?.ToString("F2") ?? "N/A"} 漲跌={changePercent?.ToString("F2") ?? "N/A"}%");
+		    }
 	    };
 
 	    _isSkEventsRegistered = true;
@@ -2571,7 +2571,7 @@ namespace StockManager
 	    {
 		Title = "群益登入",
 		Width = 360,
-		Height = 305,
+		Height = 450,
 		WindowStartupLocation = WindowStartupLocation.CenterOwner,
 		ResizeMode = ResizeMode.NoResize,
 		Owner = this,

@@ -49,7 +49,7 @@ namespace StockManager.Services
                                                 // 使用新方法：獲取價格和前收盤價
                                                 _priceFetcher.UpdatePriceWithPreviousClose(ticker);
 
-                                                Thread.Sleep(600);
+                                                Thread.Sleep(300);
                                         }
                                         Thread.Sleep(_interval * 1000);
                                 }
