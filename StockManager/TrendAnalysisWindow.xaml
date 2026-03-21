@@ -9,6 +9,13 @@
         <shell:WindowChrome CaptionHeight="40" ResizeBorderThickness="6" CornerRadius="0" GlassFrameThickness="0" UseAeroCaptionButtons="False"/>
     </shell:WindowChrome.WindowChrome>
     <Window.Resources>
+       <Style TargetType="ToolTip">
+			<Setter Property="Foreground" Value="Black"/>
+			<Setter Property="Background" Value="#F5F5F5"/>
+			<Setter Property="BorderBrush" Value="#B0BEC5"/>
+			<Setter Property="BorderThickness" Value="1"/>
+		</Style>
+
 		<!-- 樣式定義 -->
 		<Style x:Key="StatCardStyle" TargetType="Border">
 			<Setter Property="Background" Value="#1B2433"/>

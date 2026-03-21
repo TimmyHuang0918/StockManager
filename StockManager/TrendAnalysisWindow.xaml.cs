@@ -1137,6 +1137,18 @@ namespace StockManager
                         return ema;
                 }
 
+                private ToolTip CreateCandlestickToolTip(string tooltipText)
+                {
+                        return new ToolTip
+                        {
+                                Content = new TextBlock
+                                {
+                                        Text = tooltipText,
+                                        Foreground = Brushes.Black
+                                }
+                        };
+                }
+
                 private void DrawCandlestickChart(List<CandlestickData> data, int candleCount = 0)
                 {
                         try
@@ -1369,7 +1381,7 @@ namespace StockManager
                                                 Stroke = new SolidColorBrush(color),
                                                 StrokeThickness = 1
                                         };
-                                        ToolTipService.SetToolTip(wickLine, tooltipText);
+                                        ToolTipService.SetToolTip(wickLine, CreateCandlestickToolTip(tooltipText));
                                         chartCanvas.Children.Add(wickLine);
 
                                         // 繪製實體
@@ -1382,7 +1394,7 @@ namespace StockManager
                                                 Stroke = new SolidColorBrush(color),
                                                 StrokeThickness = 1
                                         };
-                                        ToolTipService.SetToolTip(bodyRect, tooltipText);
+                                        ToolTipService.SetToolTip(bodyRect, CreateCandlestickToolTip(tooltipText));
                                         Canvas.SetLeft(bodyRect, x);
                                         Canvas.SetTop(bodyRect, Math.Min(openY, closeY));
                                         chartCanvas.Children.Add(bodyRect);
@@ -1394,7 +1406,7 @@ namespace StockManager
                                                 Height = chartBottom - chartTop,
                                                 Fill = Brushes.Transparent
                                         };
-                                        ToolTipService.SetToolTip(hitArea, tooltipText);
+                                        ToolTipService.SetToolTip(hitArea, CreateCandlestickToolTip(tooltipText));
                                         Canvas.SetLeft(hitArea, x - (candleSpacing - candleWidth) / 2);
                                         Canvas.SetTop(hitArea, chartTop);
                                         chartCanvas.Children.Add(hitArea);
