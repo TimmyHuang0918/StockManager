@@ -1001,18 +1001,44 @@ namespace StockManager
 
         private void UpdateTrendScores(IEnumerable<StockInfo> stocks, IMarketDataGateway marketDataGateway)
         {
-            foreach (var stock in stocks)
+            var targetStocks = (stocks ?? Enumerable.Empty<StockInfo>()).ToList();
+            if (targetStocks.Count == 0 || marketDataGateway == null)
             {
-                if (!stock.Price.HasValue)
-                {
-                    continue;
-                }
-
-                stock.TrendScore = TradingRecommendationLibrary.CalculateSimpleScore(stock.Price, stock.PreviousClose, stock.ChangePercent);
-                var historyData = GetAdvancedRecommendationHistory(stock, marketDataGateway);
-                var advanced = TradingRecommendationLibrary.CalculateAdvancedRecommendation(historyData, stock.Price.Value, stock.ChangePercent, stock.PreviousClose);
-                stock.BuySellSuggestion = TradingRecommendationLibrary.GetAdvancedSuggestion(advanced.Score);
+                return;
             }
+
+            Task.Run(() =>
+            {
+                foreach (var stock in targetStocks)
+                {
+                    try
+                    {
+                        if (stock == null || !stock.Price.HasValue)
+                        {
+                            continue;
+                        }
+
+                        var currentPrice = stock.Price.Value;
+                        var previousClose = stock.PreviousClose;
+                        var changePercent = stock.ChangePercent;
+
+                        var trendScore = TradingRecommendationLibrary.CalculateSimpleScore(currentPrice, previousClose, changePercent);
+                        var historyData = GetAdvancedRecommendationHistory(stock, marketDataGateway);
+                        var advanced = TradingRecommendationLibrary.CalculateAdvancedRecommendation(historyData, currentPrice, changePercent, previousClose);
+                        var suggestion = TradingRecommendationLibrary.GetAdvancedSuggestion(advanced.Score);
+
+                        Dispatcher.BeginInvoke(new Action(() =>
+                        {
+                            stock.TrendScore = trendScore;
+                            stock.BuySellSuggestion = suggestion;
+                        }), DispatcherPriority.Background);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[趨勢分數更新失敗] {stock?.Ticker}: {ex.Message}");
+                    }
+                }
+            });
         }
 
         private List<CandlestickData> GetAdvancedRecommendationHistory(StockInfo stock, IMarketDataGateway marketDataGateway)
@@ -1552,7 +1578,8 @@ namespace StockManager
 
                             var batchArg = string.Join(",", batch);
                             var requestCode = SK.SKQuoteLib_RequestStocks(batchArg);
-                            Console.WriteLine($"[SK族群批次訂閱] {batchArg} => {requestCode}");
+
+			    Console.WriteLine($"[SK族群批次訂閱] {batchArg} => {requestCode}");
 
                             var waitUntil = DateTime.Now.AddSeconds(5);
                             while (DateTime.Now < waitUntil)
