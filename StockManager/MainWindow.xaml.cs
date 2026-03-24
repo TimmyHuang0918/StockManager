@@ -1,5 +1,4 @@
 ﻿using SKCOMLib;
-using SKDLLCSharp;
 using StockManager.Config;
 using StockManager.Library;
 using StockManager.Services;
@@ -1553,7 +1552,7 @@ namespace StockManager
                         if (homeStockNos.Count > 0)
                         {
                             var homeCancelArg = string.Join(",", homeStockNos);
-                            var homeCancelCode = SK.SKQuoteLib_CancelRequestStocks(homeCancelArg);
+                            var homeCancelCode = SKAPI.Instance.SKQuoteLib_CancelRequestStocks(homeCancelArg);
                             Console.WriteLine($"[SK族群前取消主頁訂閱] {homeCancelArg} => {homeCancelCode}");
                         }
 
@@ -1577,7 +1576,7 @@ namespace StockManager
                             }
 
                             var batchArg = string.Join(",", batch);
-                            var requestCode = SK.SKQuoteLib_RequestStocks(batchArg);
+                            var requestCode = SKAPI.Instance.SKQuoteLib_RequestStocks(1,batchArg);
 
 			    Console.WriteLine($"[SK族群批次訂閱] {batchArg} => {requestCode}");
 
@@ -1610,7 +1609,7 @@ namespace StockManager
                                 Thread.Sleep(120);
                             }
 
-                            var cancelCode = SK.SKQuoteLib_CancelRequestStocks(batchArg);
+                            var cancelCode = SKAPI.Instance.SKQuoteLib_CancelRequestStocks(batchArg);
                             Console.WriteLine($"[SK族群批次取消] {batchArg} => {cancelCode}");
 
                             completed += batch.Count;
@@ -1641,7 +1640,7 @@ namespace StockManager
                         if (homeStockNos.Count > 0)
                         {
                             var homeSubscribeArg = string.Join(",", homeStockNos);
-                            var homeSubscribeCode = SK.SKQuoteLib_RequestStocks(homeSubscribeArg);
+                            var homeSubscribeCode = SKAPI.Instance.SKQuoteLib_RequestStocks(1, homeSubscribeArg);
                             Console.WriteLine($"[SK族群後恢復主頁訂閱] {homeSubscribeArg} => {homeSubscribeCode}");
                         }
 
@@ -2616,6 +2615,10 @@ namespace StockManager
             base.OnClosed(e);
         }
 
+	private void test_button_Click(object sender, RoutedEventArgs e)
+	{
+            var test = m_api.SKQuoteLib_RequestKLineAMByDate("2330",4, 1, 0, "20231225", "20231227", 0);
+	}
     }
 
     public class HoldingInfo : System.ComponentModel.INotifyPropertyChanged

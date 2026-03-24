@@ -1,13 +1,16 @@
-using SKDLLCSharp;
+using SKCOMLib;
+using StockManager.Services;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Reflection.Emit;
 
 namespace StockManager
 {
     public partial class MainWindow
     {
+        SKAPI m_api = SKAPI.Instance;
         private Tuple<double?, double?, DateTime?> TryGetLatestTwSkQuote(string ticker)
         {
             if (!_isCapitalLoggedIn)
@@ -44,23 +47,36 @@ namespace StockManager
             {
                 return;
             }
+	    m_api.OnReplyMessage += OnAnnouncement;
+	    void OnAnnouncement(string strUserID, string bstrMessage, out short nConfirmCode)
+	    {
+		nConfirmCode = -1;
+		string msg = "【註冊公告OnReplyMessage】" + strUserID + "_" + bstrMessage;
+	    }
 
-            SK.OnReplyMessage += (strLoginID, strMessage) =>
-            {
-                Console.WriteLine($"[OnReplyMessage] {strLoginID}: {strMessage}");
-            };
+	    m_api.OnConnection += (nKind, code) =>
+	    {
+		Console.WriteLine($"[OnConnection] nKind={nKind}, code={code}");
 
-            SK.OnConnection += (loginID, code) =>
-            {
-                Console.WriteLine($"[OnConnection] {loginID}, Code={code}");
-            };
+		if (nKind == 3003)
+		{
+		    _isSkQuoteConnectionReady = true;
 
-            SK.OnNotifyQuoteLONG += (nMarketNo, strStockNo) =>
+		    if (!_hasInitialSkStocksRequested)
+		    {
+			_hasInitialSkStocksRequested = true;
+			SubscribeTwStocksFromSk();
+		    }
+		}
+	    };
+
+	    m_api.OnNotifyQuoteLONG += (nMarketNo, strStockNo) =>
             {
-                var pSKStockLONG = SK.SKQuoteLib_GetStockByStockNo(nMarketNo, strStockNo);
-                if (pSKStockLONG.nCode == 0)
+                SKCOMLib.SKSTOCKLONG pSKStockLONG = new SKCOMLib.SKSTOCKLONG();
+                var code = m_api.SKQuoteLib_GetStockByIndexLONG(nMarketNo, strStockNo, ref pSKStockLONG);
+                if (code == 0)
                 {
-                    var ticker = NormalizeTwTickerForUi(strStockNo);
+                    var ticker = NormalizeTwTickerForUi(pSKStockLONG.bstrStockNo);
                     var close = TryGetScaledSkPrice(pSKStockLONG, pSKStockLONG.nClose);
                     var prevClose = TryGetScaledSkPrice(pSKStockLONG, (int)(TryGetSkNumericField(pSKStockLONG, "nRef") ?? 0));
                     double? changePercent = null;
@@ -68,13 +84,11 @@ namespace StockManager
                     {
                         changePercent = (close.Value - prevClose.Value) / prevClose.Value * 100;
                     }
-
                     lock (_skTwQuoteLock)
                     {
                         _twSkQuoteCache[ticker] = Tuple.Create(close, prevClose, changePercent, DateTime.Now);
                         _lastSkQuoteReceivedAt = DateTime.Now;
                     }
-
                     Console.WriteLine($"[SK即時] {ticker} 成交={close?.ToString("F2") ?? "N/A"} 漲跌={changePercent?.ToString("F2") ?? "N/A"}%");
                 }
             };
@@ -86,6 +100,12 @@ namespace StockManager
         {
             if (!_isCapitalLoggedIn || _twStockList == null)
             {
+                return;
+            }
+
+            if (!_isSkQuoteConnectionReady)
+            {
+                Console.WriteLine("[SK訂閱] 尚未收到 OnConnection nKind=3003，暫不送出 RequestStocks。");
                 return;
             }
 
@@ -106,7 +126,7 @@ namespace StockManager
             if (toCancel.Count > 0)
             {
                 var cancelArg = string.Join(",", toCancel);
-                var cancelCode = SK.SKQuoteLib_CancelRequestStocks(cancelArg);
+                var cancelCode = m_api.SKQuoteLib_CancelRequestStocks(cancelArg);
                 Console.WriteLine($"[SK取消訂閱] {cancelArg} => {cancelCode}");
 
                 if (cancelCode == 0)
@@ -135,7 +155,7 @@ namespace StockManager
             {
                 var subscribeArg = string.Join(",", toSubscribe);
                 System.Threading.Thread.Sleep(1000);
-                var code = SK.SKQuoteLib_RequestStocks(subscribeArg);
+                var code = m_api.SKQuoteLib_RequestStocks(1, subscribeArg);
                 Console.WriteLine($"[{(forceResubscribe ? "SK重送訂閱" : "SK訂閱")}] {subscribeArg} => {code}");
                 if (code == 0)
                 {

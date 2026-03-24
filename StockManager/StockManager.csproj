@@ -60,10 +60,6 @@
       <EmbedInteropTypes>True</EmbedInteropTypes>
       <HintPath>bin\x64\Debug\Interop.SKCOMLib.dll</HintPath>
     </Reference>
-    <Reference Include="SKDLLCSharp, Version=1.0.0.0, Culture=neutral, processorArchitecture=AMD64">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>bin\x64\Debug\SKDLLCSharp.dll</HintPath>
-    </Reference>
     <Reference Include="System" />
     <Reference Include="System.Data" />
     <Reference Include="System.Xml" />
@@ -99,6 +95,7 @@
     <Compile Include="Services\IMarketDataGateway.cs" />
     <Compile Include="Services\MonitorService.cs" />
     <Compile Include="Services\PriceFetcherService.cs" />
+    <Compile Include="Services\SKAPI.cs" />
     <Compile Include="Services\StockManagerService.cs" />
     <Compile Include="TrendAnalysisWindow.xaml.cs">
       <DependentUpon>TrendAnalysisWindow.xaml</DependentUpon>
