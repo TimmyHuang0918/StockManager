@@ -308,7 +308,7 @@ namespace StockManager
 
             // 初始化台股服務
             _twStockManager = new StockManagerService(AppConfig.DefaultTwStocks, AppConfig.UserTwStocksFile);
-            _twPriceFetcher = new CompositeMarketDataGateway(new PriceFetcherService(), TryGetLatestTwSkQuote, () => _isCapitalLoggedIn);
+            _twPriceFetcher = new CompositeMarketDataGateway(new PriceFetcherService(), TryGetLatestTwSkQuote, () => _isCapitalLoggedIn, TryGetTwSkKLineHistoryForHistoricalData);
             _twMonitor = new MonitorService(_twStockManager, _twPriceFetcher);
         }
 

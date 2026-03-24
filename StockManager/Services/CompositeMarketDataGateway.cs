@@ -9,15 +9,18 @@ namespace StockManager.Services
         private readonly IMarketDataGateway _fallback;
         private readonly Func<string, Tuple<double?, double?, DateTime?>> _twSkQuoteProvider;
         private readonly Func<bool> _isSkEnabledProvider;
+        private readonly Func<string, string, string, List<MarketHistoryBar>> _twSkKLineProvider;
 
         public CompositeMarketDataGateway(
             IMarketDataGateway fallback,
             Func<string, Tuple<double?, double?, DateTime?>> twSkQuoteProvider = null,
-            Func<bool> isSkEnabledProvider = null)
+            Func<bool> isSkEnabledProvider = null,
+            Func<string, string, string, List<MarketHistoryBar>> twSkKLineProvider = null)
         {
             _fallback = fallback ?? throw new ArgumentNullException(nameof(fallback));
             _twSkQuoteProvider = twSkQuoteProvider;
             _isSkEnabledProvider = isSkEnabledProvider;
+            _twSkKLineProvider = twSkKLineProvider;
         }
 
         public Tuple<double?, double?, string> GetRealtimePriceWithSource(string ticker)
@@ -80,6 +83,26 @@ namespace StockManager.Services
 
         public bool TryGetHistoricalData(string ticker, string period, string interval, out List<MarketHistoryBar> bars)
         {
+            bars = null;
+
+            if (IsTwTicker(ticker)
+                && _twSkKLineProvider != null
+                && (_isSkEnabledProvider == null || _isSkEnabledProvider()))
+            {
+                try
+                {
+                    var skBars = _twSkKLineProvider(NormalizeTwTicker(ticker), period, interval);
+                    if (skBars != null && skBars.Count > 0)
+                    {
+                        bars = skBars;
+                        return true;
+                    }
+                }
+                catch
+                {
+                }
+            }
+
             return _fallback.TryGetHistoricalData(ticker, period, interval, out bars);
         }
 

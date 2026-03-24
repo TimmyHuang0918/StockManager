@@ -2,15 +2,21 @@ using SKCOMLib;
 using StockManager.Services;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Reflection;
-using System.Reflection.Emit;
+using System.Threading;
 
 namespace StockManager
 {
     public partial class MainWindow
     {
-        SKAPI m_api = SKAPI.Instance;
+        private readonly SKAPI m_api = SKAPI.Instance;
+        private readonly object _skKLineLock = new object();
+        private readonly Dictionary<string, List<MarketHistoryBar>> _skKLineBuffer = new Dictionary<string, List<MarketHistoryBar>>(StringComparer.OrdinalIgnoreCase);
+        private string _skKLineActiveStockNo;
+        private DateTime _skKLineLastEventAt = DateTime.MinValue;
+
         private Tuple<double?, double?, DateTime?> TryGetLatestTwSkQuote(string ticker)
         {
             if (!_isCapitalLoggedIn)
@@ -47,53 +53,258 @@ namespace StockManager
             {
                 return;
             }
-	    m_api.OnReplyMessage += OnAnnouncement;
-	    void OnAnnouncement(string strUserID, string bstrMessage, out short nConfirmCode)
-	    {
-		nConfirmCode = -1;
-		string msg = "【註冊公告OnReplyMessage】" + strUserID + "_" + bstrMessage;
-	    }
 
-	    m_api.OnConnection += (nKind, code) =>
-	    {
-		Console.WriteLine($"[OnConnection] nKind={nKind}, code={code}");
-
-		if (nKind == 3003)
-		{
-		    _isSkQuoteConnectionReady = true;
-
-		    if (!_hasInitialSkStocksRequested)
-		    {
-			_hasInitialSkStocksRequested = true;
-			SubscribeTwStocksFromSk();
-		    }
-		}
-	    };
-
-	    m_api.OnNotifyQuoteLONG += (nMarketNo, strStockNo) =>
+            m_api.OnReplyMessage += OnAnnouncement;
+            void OnAnnouncement(string strUserID, string bstrMessage, out short nConfirmCode)
             {
-                SKCOMLib.SKSTOCKLONG pSKStockLONG = new SKCOMLib.SKSTOCKLONG();
-                var code = m_api.SKQuoteLib_GetStockByIndexLONG(nMarketNo, strStockNo, ref pSKStockLONG);
+                nConfirmCode = -1;
+            }
+
+            m_api.OnConnection += (nKind, code) =>
+            {
+                Console.WriteLine($"[OnConnection] nKind={nKind}, code={code}");
+
+                if (nKind == 3003)
+                {
+                    _isSkQuoteConnectionReady = true;
+
+                    if (!_hasInitialSkStocksRequested)
+                    {
+                        _hasInitialSkStocksRequested = true;
+                        SubscribeTwStocksFromSk();
+                    }
+                }
+            };
+
+            m_api.OnNotifyQuoteLONG += (nMarketNo, nIndex) =>
+            {
+                var skStock = new SKSTOCKLONG();
+                var code = m_api.SKQuoteLib_GetStockByIndexLONG(nMarketNo, nIndex, ref skStock);
                 if (code == 0)
                 {
-                    var ticker = NormalizeTwTickerForUi(pSKStockLONG.bstrStockNo);
-                    var close = TryGetScaledSkPrice(pSKStockLONG, pSKStockLONG.nClose);
-                    var prevClose = TryGetScaledSkPrice(pSKStockLONG, (int)(TryGetSkNumericField(pSKStockLONG, "nRef") ?? 0));
+                    var ticker = NormalizeTwTickerForUi(skStock.bstrStockNo);
+                    var close = TryGetScaledSkPrice(skStock, skStock.nClose);
+                    var prevClose = TryGetScaledSkPrice(skStock, (int)(TryGetSkNumericField(skStock, "nRef") ?? 0));
                     double? changePercent = null;
                     if (close.HasValue && prevClose.HasValue && Math.Abs(prevClose.Value) > 0.000001)
                     {
                         changePercent = (close.Value - prevClose.Value) / prevClose.Value * 100;
                     }
+
                     lock (_skTwQuoteLock)
                     {
                         _twSkQuoteCache[ticker] = Tuple.Create(close, prevClose, changePercent, DateTime.Now);
                         _lastSkQuoteReceivedAt = DateTime.Now;
                     }
+
                     Console.WriteLine($"[SK即時] {ticker} 成交={close?.ToString("F2") ?? "N/A"} 漲跌={changePercent?.ToString("F2") ?? "N/A"}%");
                 }
             };
 
+            m_api.OnNotifyKLineData += OnNotifyKLineData;
+            void OnNotifyKLineData(string bstrStockNo, string bstrData)
+            {
+                MarketHistoryBar bar;
+                if (!TryParseSkKLineBar(bstrData, out bar))
+                {
+                    return;
+                }
+
+                var stockNo = NormalizeTwTickerForSkRequest(bstrStockNo);
+                if (string.IsNullOrWhiteSpace(stockNo))
+                {
+                    stockNo = _skKLineActiveStockNo;
+                }
+
+                if (string.IsNullOrWhiteSpace(stockNo))
+                {
+                    return;
+                }
+
+                lock (_skKLineLock)
+                {
+                    List<MarketHistoryBar> list;
+                    if (!_skKLineBuffer.TryGetValue(stockNo, out list))
+                    {
+                        list = new List<MarketHistoryBar>();
+                        _skKLineBuffer[stockNo] = list;
+                    }
+
+                    var existed = list.FirstOrDefault(x => x.DateText == bar.DateText);
+                    if (existed == null)
+                    {
+                        list.Add(bar);
+                    }
+                    else
+                    {
+                        existed.Open = bar.Open;
+                        existed.High = bar.High;
+                        existed.Low = bar.Low;
+                        existed.Close = bar.Close;
+                        existed.Volume = bar.Volume;
+                    }
+
+                    _skKLineLastEventAt = DateTime.Now;
+                }
+            }
+
             _isSkEventsRegistered = true;
+        }
+
+        private List<MarketHistoryBar> TryGetTwSkKLineHistoryForHistoricalData(string ticker, string period, string interval)
+        {
+            if (!_isCapitalLoggedIn || !_isSkQuoteConnectionReady)
+            {
+                return null;
+            }
+
+            if (!string.Equals(interval, "1d", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            var stockNo = NormalizeTwTickerForSkRequest(ticker);
+            if (string.IsNullOrWhiteSpace(stockNo))
+            {
+                return null;
+            }
+
+            var endDate = DateTime.Today;
+            var startDate = endDate.AddMonths(-3);
+
+            var normalizedPeriod = (period ?? string.Empty).Trim().ToLowerInvariant();
+            if (normalizedPeriod.EndsWith("mo"))
+            {
+                int months;
+                if (int.TryParse(normalizedPeriod.Substring(0, normalizedPeriod.Length - 2), out months) && months > 0)
+                {
+                    startDate = endDate.AddMonths(-months);
+                }
+            }
+            else if (normalizedPeriod.EndsWith("y"))
+            {
+                int years;
+                if (int.TryParse(normalizedPeriod.Substring(0, normalizedPeriod.Length - 1), out years) && years > 0)
+                {
+                    startDate = endDate.AddYears(-years);
+                }
+            }
+
+            lock (_skKLineLock)
+            {
+                _skKLineActiveStockNo = stockNo;
+                _skKLineLastEventAt = DateTime.MinValue;
+                _skKLineBuffer[stockNo] = new List<MarketHistoryBar>();
+            }
+
+	    var requestCode = m_api.SKQuoteLib_RequestKLineAMByDate(
+                stockNo,
+                4,
+                1,
+                0,
+                startDate.ToString("yyyyMMdd"),
+                endDate.ToString("yyyyMMdd"),
+                1);
+
+            if (requestCode != 0)
+            {
+                Console.WriteLine($"[SK KLine請求失敗] {stockNo}, code={requestCode}");
+                return null;
+            }
+
+            var waitUntil = DateTime.Now.AddSeconds(4);
+            while (DateTime.Now < waitUntil)
+            {
+                DateTime lastEventAt;
+                int count;
+                lock (_skKLineLock)
+                {
+                    lastEventAt = _skKLineLastEventAt;
+                    List<MarketHistoryBar> list;
+                    count = _skKLineBuffer.TryGetValue(stockNo, out list) && list != null ? list.Count : 0;
+                }
+
+                if (count > 0 && lastEventAt != DateTime.MinValue && (DateTime.Now - lastEventAt).TotalMilliseconds >= 350)
+                {
+                    break;
+                }
+
+                Thread.Sleep(80);
+            }
+
+            lock (_skKLineLock)
+            {
+                List<MarketHistoryBar> bars;
+                if (!_skKLineBuffer.TryGetValue(stockNo, out bars) || bars == null || bars.Count == 0)
+                {
+                    return null;
+                }
+
+                return bars
+                    .OrderBy(x => x.DateText)
+                    .Select(x => new MarketHistoryBar
+                    {
+                        DateText = x.DateText,
+                        Open = x.Open,
+                        High = x.High,
+                        Low = x.Low,
+                        Close = x.Close,
+                        Volume = x.Volume
+                    })
+                    .ToList();
+            }
+        }
+
+        private bool TryParseSkKLineBar(string data, out MarketHistoryBar bar)
+        {
+            bar = null;
+            if (string.IsNullOrWhiteSpace(data))
+            {
+                return false;
+            }
+
+            var values = data.Split(',');
+            if (values.Length < 6)
+            {
+                return false;
+            }
+
+            DateTime date;
+            if (!DateTime.TryParse(values[0].Trim(), out date))
+            {
+                var text = values[0].Trim();
+                var formats = new[] { "yyyy/MM/dd", "yyyy-MM-dd", "yyyyMMdd" };
+                if (!DateTime.TryParseExact(text, formats, CultureInfo.InvariantCulture, DateTimeStyles.None, out date))
+                {
+                    return false;
+                }
+            }
+
+            double open;
+            double high;
+            double low;
+            double close;
+            double volumeValue;
+            if (!double.TryParse(values[1].Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out open)
+                || !double.TryParse(values[2].Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out high)
+                || !double.TryParse(values[3].Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out low)
+                || !double.TryParse(values[4].Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out close)
+                || !double.TryParse(values[5].Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out volumeValue))
+            {
+                return false;
+            }
+
+            bar = new MarketHistoryBar
+            {
+                DateText = date.ToString("yyyy-MM-dd"),
+                Open = open,
+                High = high,
+                Low = low,
+                Close = close,
+                Volume = (long)Math.Max(0, Math.Round(volumeValue))
+            };
+
+            return true;
         }
 
         private void SubscribeTwStocksFromSk(bool forceResubscribe = false)
@@ -154,7 +365,7 @@ namespace StockManager
             if (toSubscribe.Count > 0)
             {
                 var subscribeArg = string.Join(",", toSubscribe);
-                System.Threading.Thread.Sleep(1000);
+                Thread.Sleep(1000);
                 var code = m_api.SKQuoteLib_RequestStocks(1, subscribeArg);
                 Console.WriteLine($"[{(forceResubscribe ? "SK重送訂閱" : "SK訂閱")}] {subscribeArg} => {code}");
                 if (code == 0)

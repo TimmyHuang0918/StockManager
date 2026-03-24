@@ -156,15 +156,6 @@ namespace StockManager
 		    
 		}
 	    }
-	    //事件回傳技術分析資訊
-	    {
-		m_api.OnNotifyKLineData += OnNotifyKLineData;
-		void OnNotifyKLineData(string bstrStockNo, string bstrData)
-		{
-		    string[] values = new string[6];
-		    values = bstrData.Split(',');
-		}
-	    }
 	    //事件回傳指定國內市場－各類股商品清單
 	    {
 		m_api.OnNotifyCommodityListWithTypeNo += OnNotifyCommodityListWithTypeNo;
