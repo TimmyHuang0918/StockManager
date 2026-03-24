@@ -77,10 +77,24 @@ namespace StockManager
 	    private readonly string _capitalCredentialFile = System.IO.Path.Combine(AppConfig.UserConfigDir, "capital_login_credential.dat");
         private readonly Dictionary<string, Tuple<DateTime, List<CandlestickData>>> _advancedRecommendationHistoryCache = new Dictionary<string, Tuple<DateTime, List<CandlestickData>>>(StringComparer.OrdinalIgnoreCase);
         private readonly TimeSpan _advancedRecommendationHistoryCacheTtl = TimeSpan.FromMinutes(15);
+        private bool _isUsAutoRefreshEnabled = false;
+        private bool _isTwAutoRefreshEnabled = true;
 
         public MainWindow()
         {
             InitializeComponent();
+            _isUsAutoRefreshEnabled = chkUsAutoRefresh != null && chkUsAutoRefresh.IsChecked == true;
+            _isTwAutoRefreshEnabled = chkTwAutoRefresh != null && chkTwAutoRefresh.IsChecked == true;
+            if (chkUsAutoRefresh != null)
+            {
+                chkUsAutoRefresh.Checked += ChkUsAutoRefresh_Changed;
+                chkUsAutoRefresh.Unchecked += ChkUsAutoRefresh_Changed;
+            }
+            if (chkTwAutoRefresh != null)
+            {
+                chkTwAutoRefresh.Checked += ChkTwAutoRefresh_Changed;
+                chkTwAutoRefresh.Unchecked += ChkTwAutoRefresh_Changed;
+            }
             StateChanged += MainWindow_StateChanged;
             InitializeServices();
             InitializeUI();
@@ -377,10 +391,88 @@ namespace StockManager
             }
             ApplyFilter("TW");
 
-	    if (_isCapitalLoggedIn)
+	    if (_isCapitalLoggedIn && _isTwAutoRefreshEnabled)
 	    {
 		SubscribeTwStocksFromSk();
 	    }
+        }
+
+        private void ChkUsAutoRefresh_Changed(object sender, RoutedEventArgs e)
+        {
+            _isUsAutoRefreshEnabled = chkUsAutoRefresh != null && chkUsAutoRefresh.IsChecked == true;
+
+            if (!_isUsAutoRefreshEnabled)
+            {
+                _countdownSeconds = 0;
+                if (progressBar != null)
+                {
+                    progressBar.Value = 0;
+                }
+            }
+
+            if (_isUsAutoRefreshEnabled)
+            {
+                _usMonitor?.Resume();
+                if (statusText != null)
+                {
+                    statusText.Text = "美股自動刷新已開啟";
+                }
+            }
+            else
+            {
+                _usMonitor?.Pause();
+                if (statusText != null)
+                {
+                    statusText.Text = "美股自動刷新已關閉";
+                }
+            }
+        }
+
+        private void ChkTwAutoRefresh_Changed(object sender, RoutedEventArgs e)
+        {
+            _isTwAutoRefreshEnabled = chkTwAutoRefresh != null && chkTwAutoRefresh.IsChecked == true;
+
+            if (!_isTwAutoRefreshEnabled)
+            {
+                _countdownSeconds = 0;
+                if (progressBar != null)
+                {
+                    progressBar.Value = 0;
+                }
+            }
+
+            if (_isTwAutoRefreshEnabled)
+            {
+                _twMonitor?.Resume();
+                if (_isCapitalLoggedIn)
+                {
+                    SubscribeTwStocksFromSk(true);
+                }
+                if (statusText != null)
+                {
+                    statusText.Text = "台股自動刷新已開啟";
+                }
+            }
+            else
+            {
+                _twMonitor?.Pause();
+
+                if (_isCapitalLoggedIn && _skSubscribedTwStocks.Count > 0)
+                {
+                    var cancelArg = string.Join(",", _skSubscribedTwStocks.ToList());
+                    var cancelCode = m_api.SKQuoteLib_CancelRequestStocks(cancelArg);
+                    Console.WriteLine($"[SK自動刷新關閉] 取消台股訂閱 {cancelArg} => {cancelCode}");
+                    if (cancelCode == 0)
+                    {
+                        _skSubscribedTwStocks.Clear();
+                    }
+                }
+
+                if (statusText != null)
+                {
+                    statusText.Text = "台股自動刷新已關閉";
+                }
+            }
         }
 
         private void LoadHoldings()
@@ -639,6 +731,17 @@ namespace StockManager
         {
             _usMonitor.StartThreads(_updateInterval);
             _twMonitor.StartThreads(_updateInterval);
+
+            if (!_isUsAutoRefreshEnabled)
+            {
+                _usMonitor?.Pause();
+            }
+
+            if (!_isTwAutoRefreshEnabled)
+            {
+                _twMonitor?.Pause();
+            }
+
             statusText.Text = "監控已啟動";
 
             // 🐍 啟動時立即使用 yfinance 抓取一次數據
@@ -682,8 +785,6 @@ namespace StockManager
                     try
                     {
                         _usPriceFetcher.UpdatePriceWithPreviousClose(ticker);
-
-                        // 檢查是否成功
                         var prices = _usPriceFetcher.GetPrices();
                         if (prices.ContainsKey(ticker) && prices[ticker].Item1.HasValue)
                         {
@@ -702,13 +803,11 @@ namespace StockManager
                         usFailCount++;
                     }
 
-                    // 添加間隔避免請求過快
                     if (i < usTickers.Count - 1)
                     {
-                        System.Threading.Thread.Sleep(300); // 300ms 間隔
+                        Thread.Sleep(300);
                     }
 
-                    // 更新進度
                     Dispatcher.Invoke(() =>
                     {
                         var progress = (i + 1) * 100.0 / usTickers.Count;
@@ -720,64 +819,68 @@ namespace StockManager
                 Console.WriteLine($"📊 美股載入完成: 成功 {usSuccessCount}/{usTickers.Count}, 失敗 {usFailCount}");
                 Console.WriteLine("");
 
-                // 預載台股數據
-                var twTickers = _twStockManager.GetTickers();
-                Console.WriteLine($"📊 台股: 開始載入 {twTickers.Count} 支股票");
-
                 int twSuccessCount = 0;
                 int twFailCount = 0;
+                var twTickers = _twStockManager.GetTickers();
 
-                for (int i = 0; i < twTickers.Count; i++)
+                if (_isCapitalLoggedIn)
                 {
-                    var ticker = twTickers[i];
-                    Console.WriteLine($"  [{i + 1}/{twTickers.Count}] 正在載入 {ticker}...");
-
-                    try
-                    {
-                        _twPriceFetcher.UpdatePriceWithPreviousClose(ticker);
-
-                        // 檢查是否成功
-                        var prices = _twPriceFetcher.GetPrices();
-                        if (prices.ContainsKey(ticker) && prices[ticker].Item1.HasValue)
-                        {
-                            Console.WriteLine($"    ✅ 成功: ${prices[ticker].Item1.Value:F2}");
-                            twSuccessCount++;
-                        }
-                        else
-                        {
-                            Console.WriteLine($"    ⚠️  無數據");
-                            twFailCount++;
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"    ❌ 失敗: {ex.Message}");
-                        twFailCount++;
-                    }
-
-                    // 添加間隔
-                    if (i < twTickers.Count - 1)
-                    {
-                        System.Threading.Thread.Sleep(300);
-                    }
-
-                    // 更新進度
+                    Console.WriteLine("📊 台股: 已登入群益，跳過 yfinance 預載，改用 SK 即時資料");
                     Dispatcher.Invoke(() =>
                     {
-                        var progress = (i + 1) * 100.0 / twTickers.Count;
-                        progressBar.Value = progress;
-                        statusText.Text = $"🐍 載入台股 [{i + 1}/{twTickers.Count}] {ticker}...";
+                        statusText.Text = "📡 台股使用群益即時資料，跳過 yfinance 預載";
+                        progressBar.Value = 0;
                     });
+
+                    SubscribeTwStocksFromSk(true);
+                    twSuccessCount = twTickers.Count;
+                }
+                else
+                {
+                    Console.WriteLine($"📊 台股: 開始載入 {twTickers.Count} 支股票");
+
+                    for (int i = 0; i < twTickers.Count; i++)
+                    {
+                        var ticker = twTickers[i];
+                        Console.WriteLine($"  [{i + 1}/{twTickers.Count}] 正在載入 {ticker}...");
+
+                        try
+                        {
+                            _twPriceFetcher.UpdatePriceWithPreviousClose(ticker);
+                            var prices = _twPriceFetcher.GetPrices();
+                            if (prices.ContainsKey(ticker) && prices[ticker].Item1.HasValue)
+                            {
+                                Console.WriteLine($"    ✅ 成功: ${prices[ticker].Item1.Value:F2}");
+                                twSuccessCount++;
+                            }
+                            else
+                            {
+                                Console.WriteLine($"    ⚠️  無數據");
+                                twFailCount++;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"    ❌ 失敗: {ex.Message}");
+                            twFailCount++;
+                        }
+
+                        if (i < twTickers.Count - 1)
+                        {
+                            Thread.Sleep(300);
+                        }
+
+                        Dispatcher.Invoke(() =>
+                        {
+                            var progress = (i + 1) * 100.0 / twTickers.Count;
+                            progressBar.Value = progress;
+                            statusText.Text = $"🐍 載入台股 [{i + 1}/{twTickers.Count}] {ticker}...";
+                        });
+                    }
+
+                    Console.WriteLine($"📊 台股載入完成: 成功 {twSuccessCount}/{twTickers.Count}, 失敗 {twFailCount}");
                 }
 
-                Console.WriteLine($"📊 台股載入完成: 成功 {twSuccessCount}/{twTickers.Count}, 失敗 {twFailCount}");
-                Console.WriteLine("");
-                Console.WriteLine("========================================");
-                Console.WriteLine($"🎉 預載完成！總計: 美股 {usSuccessCount}/{usTickers.Count}, 台股 {twSuccessCount}/{twTickers.Count}");
-                Console.WriteLine("========================================");
-                Console.WriteLine("");
-
-                // 更新 UI 顯示
                 Dispatcher.Invoke(() =>
                 {
                     btnRefresh.IsEnabled = false;
@@ -807,11 +910,32 @@ namespace StockManager
                 return;
             }
 
+            if (!IsCurrentMarketAutoRefreshEnabled())
+            {
+                return;
+            }
+
             UpdatePriceDisplay();
         }
 
         private void CountdownTimer_Tick(object sender, EventArgs e)
         {
+            if (!IsCurrentMarketAutoRefreshEnabled())
+            {
+                if (progressBar != null)
+                {
+                    progressBar.Value = 0;
+                }
+
+                if (statusText != null)
+                {
+                    var selectedTab = marketTabControl?.SelectedItem as TabItem;
+                    var selectedTabHeader = selectedTab?.Header?.ToString() ?? "";
+                    statusText.Text = $"自動刷新已關閉 | 當前市場: {selectedTabHeader}";
+                }
+                return;
+            }
+
             _countdownSeconds++;
             if (_countdownSeconds >= _updateInterval)
             {
@@ -826,6 +950,12 @@ namespace StockManager
             var currentTab = marketTabControl.SelectedItem as TabItem;
             var tabHeader = currentTab?.Header?.ToString() ?? "";
             statusText.Text = $"下次更新: {remaining} 秒 | 當前市場: {tabHeader}";
+        }
+
+        private bool IsCurrentMarketAutoRefreshEnabled()
+        {
+            var selectedIndex = marketTabControl?.SelectedIndex ?? 0;
+            return selectedIndex == 0 ? _isUsAutoRefreshEnabled : _isTwAutoRefreshEnabled;
         }
 
         private void UpdatePriceDisplay(bool updateRecommendationColumns = false)
@@ -922,61 +1052,67 @@ namespace StockManager
 
             if (_isCapitalLoggedIn)
             {
-                if (!_isSkSectorBatchUpdating)
+                if (_isTwAutoRefreshEnabled && !_isSkSectorBatchUpdating)
                 {
                     EnsureSkSubscriptionAlive();
                 }
-                ApplySkTwQuotesToStockList();
+                if (_isTwAutoRefreshEnabled)
+                {
+                    ApplySkTwQuotesToStockList();
+                }
             }
             else
             {
                 // 更新台股價格顯示（未登入群益時使用 yfinance）
-                var twPrices = _twPriceFetcher.GetPrices();
-                var twPriceMeta = _twPriceFetcher.GetPriceMeta();
-
-                Console.WriteLine($"台股數據: {twPrices.Count} 筆");
-
-                foreach (var stock in _twStockList)
+                if (_isTwAutoRefreshEnabled)
                 {
-                    if (twPrices.ContainsKey(stock.Ticker))
-                    {
-                        var priceData = twPrices[stock.Ticker];
-                        stock.Price = priceData.Item1;
-                        stock.ChangePercent = priceData.Item2;
+                    var twPrices = _twPriceFetcher.GetPrices();
+                    var twPriceMeta = _twPriceFetcher.GetPriceMeta();
 
-                        // 從 Meta 獲取前收盤價（台股）
+                    Console.WriteLine($"台股數據: {twPrices.Count} 筆");
+
+                    foreach (var stock in _twStockList)
+                    {
+                        if (twPrices.ContainsKey(stock.Ticker))
+                        {
+                            var priceData = twPrices[stock.Ticker];
+                            stock.Price = priceData.Item1;
+                            stock.ChangePercent = priceData.Item2;
+
+                            // 從 Meta 獲取前收盤價（台股）
+                            if (twPriceMeta.ContainsKey(stock.Ticker))
+                            {
+                                var meta = twPriceMeta[stock.Ticker];
+
+                                double? previousClose = null;
+                                if (meta.ContainsKey("previous_close") && meta["previous_close"] != null)
+                                {
+                                    previousClose = meta["previous_close"] as double?;
+                                }
+
+                                // 設置前收盤價到 UI
+                                stock.PreviousClose = previousClose;
+
+                                // 優先用前收盤價自行計算漲跌幅
+                                if (stock.Price.HasValue && previousClose.HasValue && previousClose.Value != 0)
+                                {
+                                    var change = stock.Price.Value - previousClose.Value;
+                                    stock.ChangePercent = (change / previousClose.Value) * 100;
+                                }
+                            }
+
+                            // 詳細診斷日誌
+                            var priceStr = priceData.Item1?.ToString("F2") ?? "null";
+                            var changeStr = stock.ChangePercent?.ToString("F2") ?? "null";
+                            var hasChange = stock.ChangePercent.HasValue ? "✅" : "❌";
+                            Console.WriteLine($"  {stock.Ticker}: Price={priceStr}, Change={changeStr}% {hasChange}");
+                        }
                         if (twPriceMeta.ContainsKey(stock.Ticker))
                         {
                             var meta = twPriceMeta[stock.Ticker];
-
-                            double? previousClose = null;
-                            if (meta.ContainsKey("previous_close") && meta["previous_close"] != null)
-                            {
-                                previousClose = meta["previous_close"] as double?;
-                            }
-
-                            // 設置前收盤價到 UI
-                            stock.PreviousClose = previousClose;
-
-                            // 優先用前收盤價自行計算漲跌幅
-                            if (stock.Price.HasValue && previousClose.HasValue && previousClose.Value != 0)
-                            {
-                                var change = stock.Price.Value - previousClose.Value;
-                                stock.ChangePercent = (change / previousClose.Value) * 100;
-                            }
+                            stock.Source = meta.ContainsKey("source") ? meta["source"]?.ToString() : "N/A";
+                            stock.UpdatedAt = meta.ContainsKey("updated_at") ? meta["updated_at"] as DateTime? : null;
                         }
-
-                        // 詳細診斷日誌
-                        var priceStr = priceData.Item1?.ToString("F2") ?? "null";
-                        var changeStr = stock.ChangePercent?.ToString("F2") ?? "null";
-                        var hasChange = stock.ChangePercent.HasValue ? "✅" : "❌";
-                        Console.WriteLine($"  {stock.Ticker}: Price={priceStr}, Change={changeStr}% {hasChange}");
-                    }
-                    if (twPriceMeta.ContainsKey(stock.Ticker))
-                    {
-                        var meta = twPriceMeta[stock.Ticker];
-                        stock.Source = meta.ContainsKey("source") ? meta["source"]?.ToString() : "N/A";
-                        stock.UpdatedAt = meta.ContainsKey("updated_at") ? meta["updated_at"] as DateTime? : null;
                     }
                 }
             }
@@ -1025,6 +1161,12 @@ namespace StockManager
                         var historyData = GetAdvancedRecommendationHistory(stock, marketDataGateway);
                         var advanced = TradingRecommendationLibrary.CalculateAdvancedRecommendation(historyData, currentPrice, changePercent, previousClose);
                         var suggestion = TradingRecommendationLibrary.GetAdvancedSuggestion(advanced.Score);
+                        var backtestSignals = TradingRecommendationLibrary.BuildBacktestSignals(historyData);
+                        var backtestSuggestion = BuildBacktestSuggestionSummary(backtestSignals, historyData != null ? historyData.Count : 0);
+                        if (!string.IsNullOrWhiteSpace(backtestSuggestion))
+                        {
+                            suggestion = suggestion + " / " + backtestSuggestion;
+                        }
 
                         Dispatcher.BeginInvoke(new Action(() =>
                         {
@@ -1038,6 +1180,39 @@ namespace StockManager
                     }
                 }
             });
+        }
+
+        private string BuildBacktestSuggestionSummary(List<Tuple<int, string, string>> signals, int historyCount)
+        {
+            if (signals == null || signals.Count == 0 || historyCount <= 0)
+            {
+                return null;
+            }
+
+            var latest = signals[signals.Count - 1];
+            if (latest == null || string.IsNullOrWhiteSpace(latest.Item2))
+            {
+                return null;
+            }
+
+            if (latest.Item1 < Math.Max(0, historyCount - 5))
+            {
+                return null;
+            }
+
+            switch (latest.Item2)
+            {
+                case "STRONG_BUY":
+                    return "回測強買";
+                case "BUY":
+                    return "回測買";
+                case "STRONG_SELL":
+                    return "回測強賣";
+                case "SELL":
+                    return "回測賣";
+                default:
+                    return null;
+            }
         }
 
         private List<CandlestickData> GetAdvancedRecommendationHistory(StockInfo stock, IMarketDataGateway marketDataGateway)
@@ -2444,8 +2619,14 @@ namespace StockManager
                 }
                 finally
                 {
-                    _usMonitor?.Resume();
-                    _twMonitor?.Resume();
+                    if (_isUsAutoRefreshEnabled)
+                    {
+                        _usMonitor?.Resume();
+                    }
+                    if (_isTwAutoRefreshEnabled)
+                    {
+                        _twMonitor?.Resume();
+                    }
                     _isManualRefreshing = false;
                 }
             });

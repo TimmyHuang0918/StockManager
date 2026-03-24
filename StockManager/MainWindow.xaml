@@ -223,6 +223,12 @@
                             <TextBlock Text="搜尋:" VerticalAlignment="Center" FontWeight="Bold" Margin="0,0,10,0"/>
                             <TextBox x:Name="txtUsSearch" Width="200" Height="25" VerticalContentAlignment="Center" 
                                       TextChanged="TxtSearch_TextChanged" Tag="US"/>
+                            <CheckBox x:Name="chkUsAutoRefresh"
+                                      Content="自動刷新"
+                                      IsChecked="False"
+                                      Margin="10,0,0,0"
+                                      VerticalAlignment="Center"
+                                      Foreground="#CFE3F7"/>
                             <TextBlock Text="  股票代號或名稱" VerticalAlignment="Center" Foreground="Gray" Margin="10,0,0,0"/>
                         </StackPanel>
                     </Border>
@@ -398,6 +404,12 @@
                             <TextBlock Text="搜尋:" VerticalAlignment="Center" FontWeight="Bold" Margin="0,0,10,0"/>
                             <TextBox x:Name="txtTwSearch" Width="200" Height="25" VerticalContentAlignment="Center"
                                       TextChanged="TxtSearch_TextChanged" Tag="TW"/>
+                            <CheckBox x:Name="chkTwAutoRefresh"
+                                      Content="自動刷新"
+                                      IsChecked="True"
+                                      Margin="10,0,0,0"
+                                      VerticalAlignment="Center"
+                                      Foreground="#CFE3F7"/>
                             <Button x:Name="btnTwYFinanceCacheUpdate" Content="更新族群快取" Width="100" Height="25" Margin="8,0,0,0"
                                     Click="BtnTwYFinanceCacheUpdate_Click" Background="#455A64" Foreground="White"
                                     FontWeight="Bold" BorderThickness="0" Cursor="Hand"/>

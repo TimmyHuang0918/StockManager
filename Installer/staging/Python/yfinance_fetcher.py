@@ -162,7 +162,7 @@ def get_stock_price(ticker):
             'error_type': type(e).__name__
         }
 
-def print_stock_history_lines(ticker, period):
+def print_stock_history_lines(ticker, period, interval="1d"):
     """
     輸出歷史 K 線資料（給 C# 解析）
     格式:
@@ -172,7 +172,7 @@ def print_stock_history_lines(ticker, period):
     cache_dir = _set_safe_tz_cache()
     try:
         stock = yf.Ticker(ticker)
-        hist = stock.history(period=period, interval="1d")
+        hist = stock.history(period=period, interval=interval)
 
         if hist is None or hist.empty:
             print("HISTORY_ERROR|No historical data")
@@ -180,7 +180,7 @@ def print_stock_history_lines(ticker, period):
 
         print("HISTORY_OK")
         for idx, row in hist.iterrows():
-            date_str = idx.strftime("%Y-%m-%d")
+            date_str = idx.strftime("%Y-%m-%d %H:%M") if interval != "1d" else idx.strftime("%Y-%m-%d")
             open_price = float(row.get("Open", 0.0))
             high_price = float(row.get("High", 0.0))
             low_price = float(row.get("Low", 0.0))
@@ -193,7 +193,7 @@ def print_stock_history_lines(ticker, period):
             try:
                 _reset_tz_cache(cache_dir)
                 stock = yf.Ticker(ticker)
-                hist = stock.history(period=period, interval="1d")
+                hist = stock.history(period=period, interval=interval)
 
                 if hist is None or hist.empty:
                     print("HISTORY_ERROR|No historical data")
@@ -201,7 +201,7 @@ def print_stock_history_lines(ticker, period):
 
                 print("HISTORY_OK")
                 for idx, row in hist.iterrows():
-                    date_str = idx.strftime("%Y-%m-%d")
+                    date_str = idx.strftime("%Y-%m-%d %H:%M") if interval != "1d" else idx.strftime("%Y-%m-%d")
                     open_price = float(row.get("Open", 0.0))
                     high_price = float(row.get("High", 0.0))
                     low_price = float(row.get("Low", 0.0))
@@ -263,7 +263,8 @@ def main():
     # 歷史模式: python yfinance_fetcher.py <ticker> history <period>
     if len(sys.argv) >= 3 and sys.argv[2].lower() == 'history':
         period = sys.argv[3] if len(sys.argv) >= 4 else '3mo'
-        print_stock_history_lines(ticker, period)
+        interval = sys.argv[4] if len(sys.argv) >= 5 else '1d'
+        print_stock_history_lines(ticker, period, interval)
         return
 
     # 財報/基本面模式: python yfinance_fetcher.py <ticker> fundamentals
