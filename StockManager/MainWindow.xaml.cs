@@ -1781,7 +1781,7 @@ namespace StockManager
                                     break;
                                 }
 
-                                Thread.Sleep(120);
+                                Thread.Sleep(500);
                             }
 
                             var cancelCode = SKAPI.Instance.SKQuoteLib_CancelRequestStocks(batchArg);
@@ -1809,7 +1809,7 @@ namespace StockManager
                                 }
                             }));
 
-                            Thread.Sleep(120);
+                            Thread.Sleep(500);
                         }
 
                         if (homeStockNos.Count > 0)
@@ -2796,10 +2796,6 @@ namespace StockManager
             base.OnClosed(e);
         }
 
-	private void test_button_Click(object sender, RoutedEventArgs e)
-	{
-            var test = m_api.SKQuoteLib_RequestKLineAMByDate("2330",4, 1, 0, "20231225", "20231227", 0);
-	}
     }
 
     public class HoldingInfo : System.ComponentModel.INotifyPropertyChanged

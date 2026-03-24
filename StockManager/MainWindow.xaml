@@ -192,16 +192,6 @@
                         Click="BtnAddHoldingUser_Click" Background="#546E7A" Foreground="White" FontWeight="Bold" BorderThickness="0" Cursor="Hand"/>
                 <Button x:Name="btnDeleteHoldingUser" Content="刪除使用者" Width="96" Height="30" Margin="8,0,0,0" Style="{StaticResource  RoundedButton}"
                         Click="BtnDeleteHoldingUser_Click" Background="#546E7A" Foreground="White" FontWeight="Bold" BorderThickness="0" Cursor="Hand"/>
-                <Button x:Name="test_button" Content="Test" RenderTransformOrigin="0.5,0.5" Click="test_button_Click">
-                    <Button.RenderTransform>
-                        <TransformGroup>
-                            <ScaleTransform/>
-                            <SkewTransform/>
-                            <RotateTransform Angle="0.066"/>
-                            <TranslateTransform/>
-                        </TransformGroup>
-                    </Button.RenderTransform>
-                </Button>
             </StackPanel>
         </Border>
 
