@@ -100,7 +100,13 @@ namespace StockManager
                                 // 設置預設的時間週期選項（3個月）
                                 if (cboPeriod != null && cboPeriod.Items.Count > 1)
                                 {
-                                        cboPeriod.SelectedIndex = 2; // 選擇 "3個月"
+                                        var defaultItem = cboPeriod.Items
+                                                .OfType<ComboBoxItem>()
+                                                .FirstOrDefault(x => string.Equals(x.Tag?.ToString(), "3mo", StringComparison.OrdinalIgnoreCase));
+                                        if (defaultItem != null)
+                                        {
+                                                cboPeriod.SelectedItem = defaultItem;
+                                        }
                                         Console.WriteLine($"[趨勢視窗] 設置預設週期為 3個月");
                                 }
 
@@ -140,7 +146,7 @@ namespace StockManager
                 }
                 private void UpdateIntradayBarsControlVisibility()
                 {
-                        var isIntraday = string.Equals(_currentPeriod, "5m", StringComparison.OrdinalIgnoreCase);
+                        var isIntraday = IsIntradayPeriod(_currentPeriod);
 
                         if (txtIntradayBarsLabel != null)
                         {
@@ -166,7 +172,7 @@ namespace StockManager
                                 if (int.TryParse(item.Tag?.ToString(), out bars) && bars > 0)
                                 {
                                         _intradayBarCount = bars;
-                                        if (string.Equals(_currentPeriod, "5m", StringComparison.OrdinalIgnoreCase))
+                                        if (IsIntradayPeriod(_currentPeriod))
                                         {
                                                 if (_historicalData != null && _historicalData.Count > 0)
                                                 {
@@ -453,7 +459,7 @@ namespace StockManager
 
                                 txtTitle.Text = $"{_stockName} ({_ticker}) - 趨勢分析";
                                 var periodText = GetPeriodDisplay(_currentPeriod);
-                                if (string.Equals(_currentPeriod, "5m", StringComparison.OrdinalIgnoreCase))
+                                if (IsIntradayPeriod(_currentPeriod))
                                 {
                                         periodText += $"（{_intradayBarCount}根）";
                                 }
@@ -695,7 +701,7 @@ namespace StockManager
                                 Console.WriteLine($"[趨勢視窗] 準備繪製圖表");
 
                                 // 繪製圖表
-                                DrawCandlestickChart(calc.HistoricalData, string.Equals(_currentPeriod, "5m", StringComparison.OrdinalIgnoreCase) ? _intradayBarCount : 0);
+                                DrawCandlestickChart(calc.HistoricalData, IsIntradayPeriod(_currentPeriod) ? _intradayBarCount : 0);
                                 DrawVolumeChart(calc.HistoricalData);
                                 DrawMacdChart(calc.HistoricalData);
                                 DrawRsiChart(calc.HistoricalData);
@@ -805,23 +811,7 @@ namespace StockManager
                         var historicalData = new List<CandlestickData>();
                         var historyPeriod = _currentPeriod;
                         var historyInterval = "1d";
-                        if (string.Equals(_currentPeriod, "5m", StringComparison.OrdinalIgnoreCase))
-                        {
-                                var bars = Math.Max(1, _intradayBarCount);
-                                if (bars <= 390)
-                                {
-                                        historyPeriod = "5d";
-                                }
-                                else if (bars <= 1560)
-                                {
-                                        historyPeriod = "1mo";
-                                }
-                                else
-                                {
-                                        historyPeriod = "3mo";
-                                }
-                                historyInterval = "5m";
-                        }
+                        ResolveIntradayHistoryRequest(out historyPeriod, out historyInterval);
 
                         if (!TryLoadHistoricalDataFromYFinance(_ticker, historyPeriod, historyInterval, historicalData))
                         {
@@ -836,7 +826,7 @@ namespace StockManager
                                 var realtimePrice = TryGetTwSkRealtimePrice(_ticker, out quoteChange, out quoteAt);
                                 if (realtimePrice.HasValue)
                                 {
-                                        ApplyRealtimePriceToKLine(historicalData, realtimePrice.Value, quoteAt ?? DateTime.Now, historyInterval);
+                                        ApplyRealtimePriceToKLine(historicalData, realtimePrice.Value, quoteAt ?? DateTime.Now, _currentPeriod);
                                 }
                         }
 
@@ -972,7 +962,8 @@ namespace StockManager
                                 return;
                         }
 
-                        if (!string.Equals(interval, "5m", StringComparison.OrdinalIgnoreCase))
+                        var bucketMinutes = GetIntradayBucketMinutes(interval);
+                        if (bucketMinutes <= 0)
                         {
                                 var lastDaily = data[data.Count - 1];
                                 lastDaily.Close = realtimePrice;
@@ -981,7 +972,7 @@ namespace StockManager
                                 return;
                         }
 
-                        var barTime = new DateTime(quoteTime.Year, quoteTime.Month, quoteTime.Day, quoteTime.Hour, (quoteTime.Minute / 5) * 5, 0);
+                        var barTime = new DateTime(quoteTime.Year, quoteTime.Month, quoteTime.Day, quoteTime.Hour, (quoteTime.Minute / bucketMinutes) * bucketMinutes, 0);
                         var barKey = barTime.ToString("MM/dd HH:mm");
                         var last = data[data.Count - 1];
 
@@ -1017,23 +1008,7 @@ namespace StockManager
                                 var historyPeriod = _currentPeriod;
                                 var historyInterval = "1d";
 
-                                if (string.Equals(_currentPeriod, "5m", StringComparison.OrdinalIgnoreCase))
-                                {
-                                        var bars = Math.Max(1, _intradayBarCount);
-                                        if (bars <= 390)
-                                        {
-                                                historyPeriod = "5d";
-                                        }
-                                        else if (bars <= 1560)
-                                        {
-                                                historyPeriod = "1mo";
-                                        }
-                                        else
-                                        {
-                                                historyPeriod = "3mo";
-                                        }
-                                        historyInterval = "5m";
-                                }
+                                ResolveIntradayHistoryRequest(out historyPeriod, out historyInterval);
 
                                 if (!TryLoadHistoricalDataFromYFinance(_ticker, historyPeriod, historyInterval, tempData) || tempData.Count == 0)
                                 {
@@ -1334,7 +1309,7 @@ namespace StockManager
 
                                                 var candleData = displayData[dataIndex];
                                                 var xAxisText = candleData.Date;
-                                                if (string.Equals(_currentPeriod, "5m", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(candleData.Date))
+                                                if (IsIntradayPeriod(_currentPeriod) && !string.IsNullOrWhiteSpace(candleData.Date))
                                                 {
                                                         var parts = candleData.Date.Split(' ');
                                                         xAxisText = parts.Length > 1 ? parts[1] : candleData.Date;
@@ -2128,7 +2103,7 @@ namespace StockManager
 
                                         target.Add(new CandlestickData
                                         {
-                                                Date = string.Equals(interval, "5m", StringComparison.OrdinalIgnoreCase)
+                                                Date = IsIntradayHistoryInterval(interval)
                                                         ? date.ToString("MM/dd HH:mm")
                                                         : date.ToString("MM/dd"),
                                                 Open = bar.Open,
@@ -2446,6 +2421,7 @@ namespace StockManager
                 {
                         switch (period)
                         {
+                                case "1m": return "1分K";
                                 case "5m": return "5分K";
                                 case "1mo": return "1個月";
                                 case "3mo": return "3個月";
@@ -2454,6 +2430,149 @@ namespace StockManager
                                 case "2y": return "2年";
                                 default: return period;
                         }
+                }
+
+                private bool IsIntradayPeriod(string period)
+                {
+                        return string.Equals(period, "1m", StringComparison.OrdinalIgnoreCase)
+                                || string.Equals(period, "5m", StringComparison.OrdinalIgnoreCase);
+                }
+
+                private bool IsIntradayHistoryInterval(string interval)
+                {
+                        return string.Equals(interval, "1m", StringComparison.OrdinalIgnoreCase)
+                                || string.Equals(interval, "5m", StringComparison.OrdinalIgnoreCase);
+                }
+
+                private int GetIntradayBucketMinutes(string period)
+                {
+                        if (string.Equals(period, "1m", StringComparison.OrdinalIgnoreCase))
+                        {
+                                return 1;
+                        }
+
+                        if (string.Equals(period, "5m", StringComparison.OrdinalIgnoreCase))
+                        {
+                                return 5;
+                        }
+
+                        return 0;
+                }
+
+                private void ResolveIntradayHistoryRequest(out string historyPeriod, out string historyInterval)
+                {
+                        historyPeriod = _currentPeriod;
+                        historyInterval = "1d";
+
+                        if (string.Equals(_currentPeriod, "5m", StringComparison.OrdinalIgnoreCase))
+                        {
+                                var bars = Math.Max(1, _intradayBarCount);
+                                if (bars <= 390)
+                                {
+                                        historyPeriod = "5d";
+                                }
+                                else if (bars <= 1560)
+                                {
+                                        historyPeriod = "1mo";
+                                }
+                                else
+                                {
+                                        historyPeriod = "3mo";
+                                }
+
+                                historyInterval = "5m";
+                                return;
+                        }
+
+                        if (string.Equals(_currentPeriod, "1m", StringComparison.OrdinalIgnoreCase))
+                        {
+                                var bars = Math.Max(1, _intradayBarCount);
+                                if (bars <= 390)
+                                {
+                                        historyPeriod = "1d";
+                                }
+                                else if (bars <= 1950)
+                                {
+                                        historyPeriod = "5d";
+                                }
+                                else
+                                {
+                                        historyPeriod = "7d";
+                                }
+
+                                historyInterval = "1m";
+                        }
+                }
+
+                private List<CandlestickData> BuildAggregatedIntradayCandles(List<CandlestickData> source, int minutes)
+                {
+                        if (source == null || source.Count == 0 || minutes <= 1)
+                        {
+                                return source ?? new List<CandlestickData>();
+                        }
+
+                        var parsed = new List<Tuple<DateTime, CandlestickData>>();
+                        foreach (var item in source)
+                        {
+                                DateTime dt;
+                                if (item != null && DateTime.TryParse(item.Date, out dt))
+                                {
+                                        parsed.Add(Tuple.Create(dt, item));
+                                }
+                        }
+
+                        if (parsed.Count == 0)
+                        {
+                                return source;
+                        }
+
+                        parsed = parsed.OrderBy(x => x.Item1).ToList();
+                        var result = new List<CandlestickData>();
+                        var bucketMap = new Dictionary<DateTime, List<CandlestickData>>();
+
+                        foreach (var item in parsed)
+                        {
+                                var dt = item.Item1;
+                                var bucket = new DateTime(dt.Year, dt.Month, dt.Day, dt.Hour, (dt.Minute / minutes) * minutes, 0);
+                                List<CandlestickData> list;
+                                if (!bucketMap.TryGetValue(bucket, out list))
+                                {
+                                        list = new List<CandlestickData>();
+                                        bucketMap[bucket] = list;
+                                }
+                                list.Add(item.Item2);
+                        }
+
+                        foreach (var pair in bucketMap.OrderBy(x => x.Key))
+                        {
+                                var bars = pair.Value;
+                                if (bars == null || bars.Count == 0)
+                                {
+                                        continue;
+                                }
+
+                                var open = bars[0].Open;
+                                var close = bars[bars.Count - 1].Close;
+                                var high = bars.Max(x => x.High);
+                                var low = bars.Min(x => x.Low);
+                                var volume = bars.Sum(x => x.Volume);
+                                var changeAmount = close - open;
+                                var changePercent = Math.Abs(open) > 0.000001 ? (changeAmount / open) * 100 : 0;
+
+                                result.Add(new CandlestickData
+                                {
+                                        Date = pair.Key.ToString("MM/dd HH:mm"),
+                                        Open = open,
+                                        High = high,
+                                        Low = low,
+                                        Close = close,
+                                        Volume = volume,
+                                        ChangeAmount = changeAmount,
+                                        ChangePercent = changePercent
+                                });
+                        }
+
+                        return result.Count > 0 ? result : source;
                 }
 
                 private string FormatVolume(long volume)

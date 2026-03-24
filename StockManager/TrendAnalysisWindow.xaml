@@ -193,6 +193,7 @@
 					<TextBlock Text="時間週期：" Foreground="White" VerticalAlignment="Center" Margin="0,0,10,0"/>
 					<ComboBox x:Name="cboPeriod" Width="130" Height="23" Background="#1F2A3D" Foreground="#E3ECF5" BorderBrush="#3A4A63"
                                                           Style="{StaticResource PeriodComboBoxStyle}" SelectionChanged="CboPeriod_SelectionChanged">
+						<ComboBoxItem Content="1分K" Tag="1m" Style="{StaticResource PeriodComboBoxItemStyle}"/>
 						<ComboBoxItem Content="5分K" Tag="5m" Style="{StaticResource PeriodComboBoxItemStyle}"/>
 						<ComboBoxItem Content="1個月" Tag="1mo" Style="{StaticResource PeriodComboBoxItemStyle}"/>
 						<ComboBoxItem Content="3個月" Tag="3mo" Style="{StaticResource PeriodComboBoxItemStyle}"/>
