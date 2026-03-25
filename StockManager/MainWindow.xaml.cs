@@ -1676,6 +1676,9 @@ namespace StockManager
             var button = sender as Button;
             var useSkBatch = _isCapitalLoggedIn;
             var skBatchSnapshot = new Dictionary<string, Tuple<double?, double?, double?, DateTime>>(StringComparer.OrdinalIgnoreCase);
+            var skBatchMissingTotal = 0;
+            var skBatchMissingSamples = new List<string>();
+            var skFallbackTickers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var cacheProgressBar = FindName("pbTwSectorCacheUpdate") as ProgressBar;
             var cachePercentText = FindName("txtTwSectorCachePercent") as TextBlock;
             var cacheEtaText = FindName("txtTwSectorCacheEta") as TextBlock;
@@ -1741,6 +1744,9 @@ namespace StockManager
                         var skStopwatch = System.Diagnostics.Stopwatch.StartNew();
                         var batchSize = 80;
                         var completed = 0;
+                        var batchWaitSeconds = 12;
+                        var pollIntervalMs = 120;
+                        var maxRetryBeforeFallback = 15;
 
                         for (int i = 0; i < sectorStockNos.Count; i += batchSize)
                         {
@@ -1754,34 +1760,73 @@ namespace StockManager
                             var requestCode = SKAPI.Instance.SKQuoteLib_RequestStocks(1,batchArg);
 
 			    Console.WriteLine($"[SK族群批次訂閱] {batchArg} => {requestCode}");
+                            var pending = new HashSet<string>(batch, StringComparer.OrdinalIgnoreCase);
 
-                            var waitUntil = DateTime.Now.AddSeconds(5);
-                            while (DateTime.Now < waitUntil)
+                            Action<HashSet<string>> collectBatchQuotes = (targets) =>
                             {
-                                var allReceived = true;
                                 lock (_skTwQuoteLock)
                                 {
-                                    foreach (var stockNo in batch)
+                                    foreach (var stockNo in targets.ToList())
                                     {
                                         var uiTicker = NormalizeTwTickerForUi(stockNo);
                                         Tuple<double?, double?, double?, DateTime> quote;
                                         if (_twSkQuoteCache.TryGetValue(uiTicker, out quote))
                                         {
                                             skBatchSnapshot[uiTicker] = quote;
-                                        }
-                                        else
-                                        {
-                                            allReceived = false;
+                                            targets.Remove(stockNo);
                                         }
                                     }
                                 }
+                            };
 
-                                if (allReceived)
+                            var attempt = 0;
+                            while (pending.Count > 0)
+                            {
+                                var waitUntil = DateTime.Now.AddSeconds(batchWaitSeconds);
+                                while (DateTime.Now < waitUntil && pending.Count > 0)
+                                {
+                                    collectBatchQuotes(pending);
+                                    if (pending.Count == 0)
+                                    {
+                                        break;
+                                    }
+
+                                    Thread.Sleep(pollIntervalMs);
+                                }
+
+                                if (pending.Count == 0)
                                 {
                                     break;
                                 }
 
-                                Thread.Sleep(500);
+                                attempt++;
+                                if (attempt > maxRetryBeforeFallback)
+                                {
+                                    Console.WriteLine($"[SK族群補訂閱] 批次重試超過 {maxRetryBeforeFallback} 次，改由 yfinance 補齊缺漏: {string.Join(",", pending.Take(10))}");
+                                    foreach (var unresolved in pending)
+                                    {
+                                        skFallbackTickers.Add(NormalizeTwTickerForUi(unresolved));
+                                    }
+                                    break;
+                                }
+
+                                var retryArg = string.Join(",", pending.ToList());
+                                var retryCode = SKAPI.Instance.SKQuoteLib_RequestStocks(1, retryArg);
+                                Console.WriteLine($"[SK族群補訂閱#{attempt}] {retryArg} => {retryCode}");
+                            }
+
+                            if (pending.Count > 0)
+                            {
+                                skBatchMissingTotal += pending.Count;
+                                foreach (var miss in pending)
+                                {
+                                    if (skBatchMissingSamples.Count >= 20)
+                                    {
+                                        break;
+                                    }
+                                    skBatchMissingSamples.Add(NormalizeTwTickerForUi(miss));
+                                }
+                                Console.WriteLine($"[SK族群批次缺漏] 共 {pending.Count} 檔未收到：{string.Join(",", pending.Take(10))}");
                             }
 
                             var cancelCode = SKAPI.Instance.SKQuoteLib_CancelRequestStocks(batchArg);
@@ -1809,7 +1854,20 @@ namespace StockManager
                                 }
                             }));
 
-                            Thread.Sleep(500);
+                            Thread.Sleep(120);
+                        }
+
+                        if (skFallbackTickers.Count > 0)
+                        {
+                            foreach (var fallbackTicker in skFallbackTickers)
+                            {
+                                var normalizedFallback = fallbackTicker.EndsWith(".TW", StringComparison.OrdinalIgnoreCase)
+                                    ? fallbackTicker
+                                    : (fallbackTicker + ".TW");
+                                _twPriceFetcher.UpdatePriceWithPreviousClose(normalizedFallback);
+                                Thread.Sleep(120);
+                            }
+                            Console.WriteLine($"[SK族群補齊] 已以 yfinance 補齊 {skFallbackTickers.Count} 檔缺漏股票");
                         }
 
                         if (homeStockNos.Count > 0)
@@ -1869,6 +1927,38 @@ namespace StockManager
                         Tuple<double?, double?, double?, DateTime> quote;
                         if (!skBatchSnapshot.TryGetValue(uiTicker, out quote))
                         {
+                            Tuple<double?, double?> fallbackPriceTuple;
+                            if (!prices.TryGetValue(normalized, out fallbackPriceTuple) || !fallbackPriceTuple.Item1.HasValue)
+                            {
+                                continue;
+                            }
+
+                            double? fallbackPreviousClose = null;
+                            Dictionary<string, object> fallbackMeta;
+                            if (meta.TryGetValue(normalized, out fallbackMeta) && fallbackMeta != null && fallbackMeta.ContainsKey("previous_close"))
+                            {
+                                fallbackPreviousClose = fallbackMeta["previous_close"] as double?;
+                            }
+
+                            double? fallbackChangePercent;
+                            if (fallbackPriceTuple.Item1.HasValue && fallbackPreviousClose.HasValue && Math.Abs(fallbackPreviousClose.Value) > 0.000001)
+                            {
+                                fallbackChangePercent = (fallbackPriceTuple.Item1.Value - fallbackPreviousClose.Value) / fallbackPreviousClose.Value * 100;
+                            }
+                            else
+                            {
+                                fallbackChangePercent = fallbackPriceTuple.Item2;
+                            }
+
+                            cacheItems.Add(new Dictionary<string, object>
+                                        {
+                                                { "Ticker", t.EndsWith(".TW", StringComparison.OrdinalIgnoreCase) ? t.Substring(0, t.Length - 3) : t },
+                                                { "Price", fallbackPriceTuple.Item1 },
+                                                { "PreviousClose", fallbackPreviousClose },
+                                                { "ChangePercent", fallbackChangePercent },
+                                                { "UpdatedAt", DateTime.Now },
+                                                { "Source", "yfinance-fallback" }
+                                        });
                             continue;
                         }
 
@@ -1951,7 +2041,15 @@ namespace StockManager
                 {
                     cacheEtaText.Text = "預估剩餘 00:00";
                 }
-                statusText.Text = $"✅ 台股族群快取更新完成，共 {cacheItems.Count} 檔";
+                if (useSkBatch && skBatchMissingTotal > 0)
+                {
+                    statusText.Text = $"⚠️ 台股族群快取更新完成 {cacheItems.Count} 檔，仍有 {skBatchMissingTotal} 檔未收到報價";
+                    Console.WriteLine($"[SK族群總缺漏] {skBatchMissingTotal} 檔。樣本：{string.Join(",", skBatchMissingSamples.Distinct(StringComparer.OrdinalIgnoreCase).Take(20))}");
+                }
+                else
+                {
+                    statusText.Text = $"✅ 台股族群快取更新完成，共 {cacheItems.Count} 檔";
+                }
             }
             catch (Exception ex)
             {
