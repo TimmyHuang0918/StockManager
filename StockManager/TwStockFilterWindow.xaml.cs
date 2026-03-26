@@ -41,6 +41,7 @@ namespace StockManager
         private readonly List<string> _yahooListedSectors = new List<string>();
         private readonly Dictionary<string, string> _tickerToYahooSector = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         private readonly string _twYFinanceSectorCacheFile = IOPath.Combine(AppConfig.UserConfigDir, "tw_sector_yfinance_cache.json");
+        private readonly string _twSuggestionCacheFile = IOPath.Combine(AppConfig.UserConfigDir, "tw_trading_suggestion_cache.json");
         private System.Windows.Threading.DispatcherTimer _autoYFinanceUpdateTimer;
         private bool _isAutoYFinanceUpdating;
         private DateTime _lastAutoYFinanceUpdateDate = DateTime.MinValue;
@@ -48,6 +49,9 @@ namespace StockManager
         private bool _loadedFromCsv;
         private string _noPriceSummary = string.Empty;
         private readonly IMarketDataGateway _trendPriceFetcher = new CompositeMarketDataGateway(new PriceFetcherService());
+        private readonly Dictionary<string, Tuple<DateTime, string>> _advancedSuggestionCache = new Dictionary<string, Tuple<DateTime, string>>(StringComparer.OrdinalIgnoreCase);
+        private int _advancedSuggestionRequestId;
+        private bool _isAdvancedSuggestionCalculating;
 
         public TwStockFilterWindow()
         {
@@ -61,13 +65,16 @@ namespace StockManager
         private async void TwStockFilterWindow_Loaded(object sender, RoutedEventArgs e)
         {
             await System.Threading.Tasks.Task.Run(() => LoadAllListedTwStocks());
+            TryLoadTradingSuggestionCache();
             ApplyFilter();
         }
 
         public async Task RefreshFromSectorCacheAsync()
         {
             await Task.Run(() => LoadAllListedTwStocks());
+            TryLoadTradingSuggestionCache();
             ApplyFilter();
+            await RecalculateAdvancedSuggestionsAsync();
         }
 
         private void TwStockFilterWindow_Unloaded(object sender, RoutedEventArgs e)
@@ -180,10 +187,24 @@ namespace StockManager
                 query = query.Where(x => x.ChangePercent.HasValue && x.ChangePercent.Value > 0);
             }
 
+            var hostMainWindow = Window.GetWindow(this) as MainWindow;
+            var mainSuggestions = hostMainWindow != null
+                ? hostMainWindow.GetTwBuySellSuggestions()
+                : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
             var result = query
                 .Select(x =>
                 {
                     var score = CalculateTradingScore(x);
+                    string suggestion;
+                    if (!TryGetMainSuggestion(mainSuggestions, x.Ticker, out suggestion))
+                    {
+                        if (!TryGetCachedAdvancedSuggestion(x.Ticker, out suggestion))
+                        {
+                            suggestion = GetTradingSuggestion(score);
+                        }
+                    }
+
                     return new TwFilterStockItem
                     {
                         Ticker = x.Ticker,
@@ -193,7 +214,7 @@ namespace StockManager
                         PreviousClose = x.PreviousClose,
                         UpdatedAt = x.UpdatedAt,
                         TradingScore = score,
-                        TradingSuggestion = GetTradingSuggestion(score)
+                        TradingSuggestion = suggestion
                     };
                 })
                 .OrderByDescending(x => x.TradingScore)
@@ -210,6 +231,261 @@ namespace StockManager
             if (hostWindow != null)
             {
                 hostWindow.Title = $"股票監控系統 - Stock Manager | 台股篩選（{_filteredStocks.Count} 筆）";
+            }
+        }
+
+        private async Task RecalculateAdvancedSuggestionsAsync()
+        {
+            if (_isAdvancedSuggestionCalculating)
+            {
+                return;
+            }
+
+            _isAdvancedSuggestionCalculating = true;
+            var requestId = System.Threading.Interlocked.Increment(ref _advancedSuggestionRequestId);
+
+            var originalStatus = txtDataStatus.Text;
+            txtDataStatus.Text = originalStatus + "｜計算買賣建議中...";
+
+            try
+            {
+                var hostMainWindow = Window.GetWindow(this) as MainWindow;
+                var mainSuggestions = hostMainWindow != null
+                    ? hostMainWindow.GetTwBuySellSuggestions()
+                    : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                var marketDataGateway = hostMainWindow != null
+                    ? hostMainWindow.GetTwMarketDataGatewayForTrend()
+                    : _trendPriceFetcher;
+
+                var sourceMap = _sourceStocks
+                    .Where(x => x != null && !string.IsNullOrWhiteSpace(x.Ticker))
+                    .ToDictionary(x => x.Ticker, StringComparer.OrdinalIgnoreCase);
+
+                var targets = _filteredStocks
+                    .Select(x => x.Ticker)
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                var total = Math.Max(1, targets.Count);
+
+                var computed = await Task.Run(() =>
+                {
+                    var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    var stopwatch = Stopwatch.StartNew();
+                    var completed = 0;
+
+                    Action updateProgress = () =>
+                    {
+                        var elapsed = stopwatch.Elapsed.TotalSeconds;
+                        var avgPerItem = elapsed / Math.Max(1, completed);
+                        var remainingSeconds = Math.Max(0, (total - completed) * avgPerItem);
+                        var eta = TimeSpan.FromSeconds(remainingSeconds);
+
+                        Dispatcher.BeginInvoke(new Action(() =>
+                        {
+                            if (requestId == _advancedSuggestionRequestId)
+                            {
+                                txtDataStatus.Text = $"{originalStatus}｜計算買賣建議中 {completed}/{total}（預估剩餘 {eta:mm\\:ss}）";
+                            }
+                        }));
+                    };
+
+                    foreach (var ticker in targets)
+                    {
+                        string mainSuggestion;
+                        if (TryGetMainSuggestion(mainSuggestions, ticker, out mainSuggestion))
+                        {
+                            result[ticker] = mainSuggestion;
+                            completed++;
+                            if (completed % 5 == 0 || completed == total)
+                            {
+                                updateProgress();
+                            }
+                            continue;
+                        }
+
+                        StockInfo stock;
+                        if (!sourceMap.TryGetValue(ticker, out stock) || stock == null)
+                        {
+                            completed++;
+                            if (completed % 5 == 0 || completed == total)
+                            {
+                                updateProgress();
+                            }
+                            continue;
+                        }
+
+                        var fallbackScore = CalculateTradingScore(stock);
+                        result[ticker] = BuildAdvancedTradingSuggestion(stock, marketDataGateway, fallbackScore);
+                        completed++;
+                        if (completed % 5 == 0 || completed == total)
+                        {
+                            updateProgress();
+                        }
+                    }
+
+                    return result;
+                });
+
+                if (requestId != _advancedSuggestionRequestId)
+                {
+                    return;
+                }
+
+                foreach (var item in _filteredStocks)
+                {
+                    if (item == null || string.IsNullOrWhiteSpace(item.Ticker))
+                    {
+                        continue;
+                    }
+
+                    string suggestion;
+                    if (computed.TryGetValue(item.Ticker, out suggestion) && !string.IsNullOrWhiteSpace(suggestion))
+                    {
+                        item.TradingSuggestion = suggestion;
+                    }
+                }
+
+                dgFilteredTwStocks.Items.Refresh();
+
+                var advancedOnly = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var pair in computed)
+                {
+                    string mainSuggestion;
+                    if (TryGetMainSuggestion(mainSuggestions, pair.Key, out mainSuggestion))
+                    {
+                        continue;
+                    }
+
+                    advancedOnly[pair.Key] = pair.Value;
+                }
+
+                SaveTradingSuggestionCache(advancedOnly);
+            }
+            finally
+            {
+                _isAdvancedSuggestionCalculating = false;
+                txtDataStatus.Text = originalStatus;
+            }
+        }
+
+        private bool TryGetCachedAdvancedSuggestion(string ticker, out string suggestion)
+        {
+            suggestion = null;
+            if (string.IsNullOrWhiteSpace(ticker))
+            {
+                return false;
+            }
+
+            Tuple<DateTime, string> cached;
+            if (!_advancedSuggestionCache.TryGetValue(ticker.Trim().ToUpperInvariant(), out cached))
+            {
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(cached.Item2))
+            {
+                return false;
+            }
+
+            suggestion = cached.Item2;
+            return true;
+        }
+
+        private void TryLoadTradingSuggestionCache()
+        {
+            try
+            {
+                if (!File.Exists(_twSuggestionCacheFile))
+                {
+                    return;
+                }
+
+                var json = File.ReadAllText(_twSuggestionCacheFile);
+                var serializer = new JavaScriptSerializer();
+                var cache = serializer.Deserialize<TradingSuggestionCacheEnvelope>(json);
+                if (cache == null || cache.Items == null || cache.Items.Count == 0)
+                {
+                    return;
+                }
+
+                foreach (var item in cache.Items)
+                {
+                    if (item == null || string.IsNullOrWhiteSpace(item.Ticker) || string.IsNullOrWhiteSpace(item.Suggestion))
+                    {
+                        continue;
+                    }
+
+                    var cacheTime = item.UpdatedAt ?? DateTime.Now;
+                    _advancedSuggestionCache[item.Ticker.Trim().ToUpperInvariant()] = Tuple.Create(cacheTime, item.Suggestion);
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private void SaveTradingSuggestionCache(Dictionary<string, string> suggestions)
+        {
+            try
+            {
+                if (suggestions == null || suggestions.Count == 0)
+                {
+                    return;
+                }
+
+                if (!Directory.Exists(AppConfig.UserConfigDir))
+                {
+                    Directory.CreateDirectory(AppConfig.UserConfigDir);
+                }
+
+                var serializer = new JavaScriptSerializer();
+                var cache = new TradingSuggestionCacheEnvelope
+                {
+                    Date = DateTime.Today.ToString("yyyy-MM-dd"),
+                    Items = new List<TradingSuggestionCacheItem>()
+                };
+
+                if (File.Exists(_twSuggestionCacheFile))
+                {
+                    var existingJson = File.ReadAllText(_twSuggestionCacheFile);
+                    var existingCache = serializer.Deserialize<TradingSuggestionCacheEnvelope>(existingJson);
+                    if (existingCache != null && existingCache.Items != null)
+                    {
+                        cache.Items = existingCache.Items
+                            .Where(x => x != null && !string.IsNullOrWhiteSpace(x.Ticker))
+                            .GroupBy(x => x.Ticker, StringComparer.OrdinalIgnoreCase)
+                            .Select(g => g.OrderByDescending(x => x.UpdatedAt ?? DateTime.MinValue).First())
+                            .ToList();
+                    }
+                }
+
+                var itemMap = cache.Items.ToDictionary(x => x.Ticker, StringComparer.OrdinalIgnoreCase);
+                foreach (var pair in suggestions)
+                {
+                    if (string.IsNullOrWhiteSpace(pair.Key) || string.IsNullOrWhiteSpace(pair.Value))
+                    {
+                        continue;
+                    }
+
+                    var key = pair.Key.Trim().ToUpperInvariant();
+                    TradingSuggestionCacheItem item;
+                    if (!itemMap.TryGetValue(key, out item))
+                    {
+                        item = new TradingSuggestionCacheItem { Ticker = key };
+                        itemMap[key] = item;
+                        cache.Items.Add(item);
+                    }
+
+                    item.Suggestion = pair.Value;
+                    item.UpdatedAt = DateTime.Now;
+                }
+
+                File.WriteAllText(_twSuggestionCacheFile, serializer.Serialize(cache), System.Text.Encoding.UTF8);
+            }
+            catch
+            {
             }
         }
 
@@ -2228,34 +2504,6 @@ namespace StockManager
                 var stockMap = new Dictionary<string, StockInfo>(StringComparer.OrdinalIgnoreCase);
                 var sectorSampleMap = new Dictionary<string, SectorSampleItem>(StringComparer.OrdinalIgnoreCase);
 
-                if (loadedFromCsv)
-                {
-                    foreach (var csvTicker in _tickerToCsvSector.Keys)
-                    {
-                        var ticker = NormalizeCsvTicker(csvTicker);
-                        if (string.IsNullOrWhiteSpace(ticker) || stockMap.ContainsKey(ticker))
-                        {
-                            continue;
-                        }
-
-                        var stock = new StockInfo(ticker, ticker)
-                        {
-                            Source = "CSV族群"
-                        };
-                        _sourceStocks.Add(stock);
-                        stockMap[ticker] = stock;
-
-                        var sample = new SectorSampleItem
-                        {
-                            Ticker = ticker,
-                            Industry = GetCsvSectorByTicker(ticker),
-                            Name = ticker
-                        };
-                        _sectorSamples.Add(sample);
-                        sectorSampleMap[ticker] = sample;
-                    }
-                }
-
                 var url = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL";
                 string json;
                 using (var client = new WebClient())
@@ -2286,10 +2534,6 @@ namespace StockManager
                     row.TryGetValue("Change", out changeText);
 
                     var isEtf = IsEtfTicker(ticker);
-                    if (loadedFromCsv && !stockMap.ContainsKey(ticker) && !isEtf)
-                    {
-                        continue;
-                    }
 
                     var close = ParseNumeric(closingPriceText);
                     var changeAmount = ParseNumeric(changeText);
@@ -2553,7 +2797,7 @@ namespace StockManager
                 .ToList();
 
             _noPriceSummary = noPriceStocks.Count > 0
-                ? $"｜無股價資料：{noPriceStocks.Count} 檔（例：{string.Join(",", noPriceStocks.Take(8))}）"
+                ? $"｜無股價資料：{noPriceStocks.Count} 檔"
                 : string.Empty;
         }
 
@@ -2563,9 +2807,10 @@ namespace StockManager
                 ? $"今日{_lastYFinanceCacheUpdatedAt.Value:HH:mm}已更新"
                 : "無";
 
-            var text = _loadedFromCsv
-                ? $"資料來源：CSV族群股票（{_sourceStocks.Count} 檔）｜TWSE補齊名稱｜yfinance暫存：{yfinanceText}{_noPriceSummary}"
-                : $"資料來源：TWSE 全部上市股票（{_sourceStocks.Count} 筆）｜Yahoo上市類股（{_yahooListedSectors.Count} 類，{_tickerToYahooSector.Count} 檔已對應）｜yfinance暫存：{yfinanceText}{_noPriceSummary}";
+            var sectorSourceText = _loadedFromCsv
+                ? $"CSV族群對照（{_tickerToCsvSector.Count} 檔）"
+                : $"Yahoo上市類股（{_yahooListedSectors.Count} 類，{_tickerToYahooSector.Count} 檔已對應）";
+            var text = $"資料來源：TWSE 全部上市股票（{_sourceStocks.Count} 筆）｜族群對照：{sectorSourceText}｜yfinance暫存：{yfinanceText}{_noPriceSummary}";
 
             if (Dispatcher.CheckAccess())
             {
@@ -2742,6 +2987,173 @@ namespace StockManager
             return TradingRecommendationLibrary.CalculateSimpleScore(stock.Price, stock.PreviousClose, stock.ChangePercent);
         }
 
+        private string BuildAdvancedTradingSuggestion(StockInfo stock, IMarketDataGateway marketDataGateway, int fallbackScore)
+        {
+            if (stock == null || string.IsNullOrWhiteSpace(stock.Ticker))
+            {
+                return GetTradingSuggestion(fallbackScore);
+            }
+
+            var cacheKey = stock.Ticker.Trim().ToUpperInvariant();
+            Tuple<DateTime, string> cached;
+            if (_advancedSuggestionCache.TryGetValue(cacheKey, out cached))
+            {
+                if (!string.IsNullOrWhiteSpace(cached.Item2))
+                {
+                    return cached.Item2;
+                }
+            }
+
+            if (!stock.Price.HasValue)
+            {
+                return GetTradingSuggestion(fallbackScore);
+            }
+
+            var historyData = LoadSuggestionHistory(stock, marketDataGateway);
+            var advanced = TradingRecommendationLibrary.CalculateAdvancedRecommendation(historyData, stock.Price.Value, stock.ChangePercent, stock.PreviousClose);
+            var suggestion = TradingRecommendationLibrary.GetAdvancedSuggestion(advanced.Score);
+            var signals = TradingRecommendationLibrary.BuildBacktestSignals(historyData);
+            var backtestText = BuildBacktestSuggestionSummary(signals, historyData != null ? historyData.Count : 0);
+            if (!string.IsNullOrWhiteSpace(backtestText))
+            {
+                suggestion = suggestion + " / " + backtestText;
+            }
+
+            _advancedSuggestionCache[cacheKey] = Tuple.Create(DateTime.Now, suggestion);
+            return suggestion;
+        }
+
+        private List<CandlestickData> LoadSuggestionHistory(StockInfo stock, IMarketDataGateway marketDataGateway)
+        {
+            var result = new List<CandlestickData>();
+            if (stock == null)
+            {
+                return result;
+            }
+
+            List<MarketHistoryBar> bars;
+            if (marketDataGateway != null &&
+                marketDataGateway.TryGetHistoricalData(stock.Ticker, "3mo", "1d", out bars) &&
+                bars != null &&
+                bars.Count > 0)
+            {
+                foreach (var bar in bars)
+                {
+                    var changeAmount = bar.Close - bar.Open;
+                    var changePercent = Math.Abs(bar.Open) > 0.000001 ? (changeAmount / bar.Open) * 100 : 0;
+                    result.Add(new CandlestickData
+                    {
+                        Date = bar.DateText,
+                        Open = bar.Open,
+                        High = bar.High,
+                        Low = bar.Low,
+                        Close = bar.Close,
+                        Volume = bar.Volume,
+                        ChangeAmount = changeAmount,
+                        ChangePercent = changePercent
+                    });
+                }
+            }
+
+            if (result.Count > 0)
+            {
+                return result;
+            }
+
+            if (!stock.Price.HasValue)
+            {
+                return result;
+            }
+
+            var previous = stock.PreviousClose ?? stock.Price.Value;
+            var current = stock.Price.Value;
+            var min = Math.Min(previous, current);
+            var max = Math.Max(previous, current);
+
+            result.Add(new CandlestickData
+            {
+                Date = DateTime.Now.AddDays(-1).ToString("yyyy-MM-dd"),
+                Open = previous,
+                High = max,
+                Low = min,
+                Close = previous,
+                Volume = 0,
+                ChangeAmount = 0,
+                ChangePercent = 0
+            });
+
+            var amount = current - previous;
+            result.Add(new CandlestickData
+            {
+                Date = DateTime.Now.ToString("yyyy-MM-dd"),
+                Open = previous,
+                High = max,
+                Low = min,
+                Close = current,
+                Volume = 0,
+                ChangeAmount = amount,
+                ChangePercent = Math.Abs(previous) > 0.000001 ? (amount / previous) * 100 : 0
+            });
+
+            return result;
+        }
+
+        private string BuildBacktestSuggestionSummary(List<Tuple<int, string, string>> signals, int historyCount)
+        {
+            if (signals == null || signals.Count == 0 || historyCount <= 0)
+            {
+                return null;
+            }
+
+            var latest = signals[signals.Count - 1];
+            if (latest == null || string.IsNullOrWhiteSpace(latest.Item2))
+            {
+                return null;
+            }
+
+            if (latest.Item1 < Math.Max(0, historyCount - 5))
+            {
+                return null;
+            }
+
+            switch (latest.Item2)
+            {
+                case "STRONG_BUY":
+                    return "回測強買";
+                case "BUY":
+                    return "回測買";
+                case "STRONG_SELL":
+                    return "回測強賣";
+                case "SELL":
+                    return "回測賣";
+                default:
+                    return null;
+            }
+        }
+
+        private bool TryGetMainSuggestion(Dictionary<string, string> suggestionMap, string ticker, out string suggestion)
+        {
+            suggestion = null;
+            if (suggestionMap == null || suggestionMap.Count == 0 || string.IsNullOrWhiteSpace(ticker))
+            {
+                return false;
+            }
+
+            var normalized = ticker.Trim().ToUpperInvariant();
+            if (suggestionMap.TryGetValue(normalized, out suggestion) && !string.IsNullOrWhiteSpace(suggestion))
+            {
+                return true;
+            }
+
+            var withTw = normalized.EndsWith(".TW", StringComparison.OrdinalIgnoreCase) ? normalized : normalized + ".TW";
+            if (suggestionMap.TryGetValue(withTw, out suggestion) && !string.IsNullOrWhiteSpace(suggestion))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
         private string GetTradingSuggestion(int score)
         {
             return TradingRecommendationLibrary.GetSimpleSuggestion(score);
@@ -2815,6 +3227,19 @@ namespace StockManager
             public double? Price { get; set; }
             public double? PreviousClose { get; set; }
             public double? ChangePercent { get; set; }
+            public DateTime? UpdatedAt { get; set; }
+        }
+
+        private class TradingSuggestionCacheEnvelope
+        {
+            public string Date { get; set; }
+            public List<TradingSuggestionCacheItem> Items { get; set; }
+        }
+
+        private class TradingSuggestionCacheItem
+        {
+            public string Ticker { get; set; }
+            public string Suggestion { get; set; }
             public DateTime? UpdatedAt { get; set; }
         }
 

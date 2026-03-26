@@ -1742,11 +1742,11 @@ namespace StockManager
 
                         var skTotal = Math.Max(1, sectorStockNos.Count);
                         var skStopwatch = System.Diagnostics.Stopwatch.StartNew();
-                        var batchSize = 80;
+                        var batchSize = 50;
                         var completed = 0;
                         var batchWaitSeconds = 12;
                         var pollIntervalMs = 120;
-                        var maxRetryBeforeFallback = 15;
+                        var maxRetryBeforeFallback = 3;
 
                         for (int i = 0; i < sectorStockNos.Count; i += batchSize)
                         {
@@ -2840,6 +2840,33 @@ namespace StockManager
         public IMarketDataGateway GetTwMarketDataGatewayForTrend()
         {
             return _twPriceFetcher;
+        }
+
+        public Dictionary<string, string> GetTwBuySellSuggestions()
+        {
+            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (_twStockList == null)
+            {
+                return result;
+            }
+
+            foreach (var stock in _twStockList)
+            {
+                if (stock == null || string.IsNullOrWhiteSpace(stock.Ticker) || string.IsNullOrWhiteSpace(stock.BuySellSuggestion))
+                {
+                    continue;
+                }
+
+                var key = stock.Ticker.Trim().ToUpperInvariant();
+                result[key] = stock.BuySellSuggestion;
+
+                if (key.EndsWith(".TW", StringComparison.OrdinalIgnoreCase) && key.Length > 3)
+                {
+                    result[key.Substring(0, key.Length - 3)] = stock.BuySellSuggestion;
+                }
+            }
+
+            return result;
         }
 
         private void BtnDebug_Click(object sender, RoutedEventArgs e)
