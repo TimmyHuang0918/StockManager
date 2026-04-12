@@ -17,6 +17,17 @@ using StockManager.Services;
 
 namespace StockManager
 {
+        public class TrendChartModuleFlags
+        {
+                public bool ShowPriceChart { get; set; } = true;
+                public bool ShowVolumeChart { get; set; } = true;
+                public bool ShowMacdChart { get; set; } = true;
+                public bool ShowRsiChart { get; set; } = true;
+                public bool ShowBacktestOverlay { get; set; } = true;
+
+                public static TrendChartModuleFlags All => new TrendChartModuleFlags();
+        }
+
         public partial class TrendAnalysisWindow : Window
         {
                 private string _ticker;
@@ -39,6 +50,11 @@ namespace StockManager
                 private bool _isRealtimeKLineMode;
                 private bool _isRealtimeKLineRefreshing;
                 private double? _lastDisplayedPrice;
+                private readonly TrendChartModuleFlags _trendChartFlags = TrendChartModuleFlags.All;
+                private Canvas chartCanvas => trendChartModuleControl != null ? trendChartModuleControl.PriceCanvas : null;
+                private Canvas volumeCanvas => trendChartModuleControl != null ? trendChartModuleControl.VolumeCanvas : null;
+                private Canvas macdCanvas => trendChartModuleControl != null ? trendChartModuleControl.MacdCanvas : null;
+                private Canvas rsiCanvas => trendChartModuleControl != null ? trendChartModuleControl.RsiCanvas : null;
 
                 public TrendAnalysisWindow(string ticker, string stockName, IMarketDataGateway priceFetcher)
                 {
@@ -176,10 +192,7 @@ namespace StockManager
                                         {
                                                 if (_historicalData != null && _historicalData.Count > 0)
                                                 {
-                                                        DrawCandlestickChart(_historicalData, _intradayBarCount);
-                                                        DrawVolumeChart(_historicalData);
-                                                        DrawMacdChart(_historicalData);
-                                                        DrawRsiChart(_historicalData);
+                                                        RenderTrendModuleCharts(_historicalData, _intradayBarCount);
 
                                                         if (txtSubtitle != null)
                                                         {
@@ -700,11 +713,8 @@ namespace StockManager
 
                                 Console.WriteLine($"[趨勢視窗] 準備繪製圖表");
 
-                                // 繪製圖表
-                                DrawCandlestickChart(calc.HistoricalData, IsIntradayPeriod(_currentPeriod) ? _intradayBarCount : 0);
-                                DrawVolumeChart(calc.HistoricalData);
-                                DrawMacdChart(calc.HistoricalData);
-                                DrawRsiChart(calc.HistoricalData);
+                                // 繪製圖表（模組化 + Flag 控制）
+                                RenderTrendModuleCharts(calc.HistoricalData, IsIntradayPeriod(_currentPeriod) ? _intradayBarCount : 0);
 
                                 Console.WriteLine($"[趨勢視窗] 生成 AI 分析");
 
@@ -1397,7 +1407,7 @@ namespace StockManager
                                 DrawMovingAverageLine(chartCanvas, ma20Series, chartLeft, chartTop, chartBottom, candleSpacing, candleWidth, minPrice, priceRange,
                                         Color.FromRgb(103, 58, 183), 1.5); // 紫色 MA20
 
-                                // 回測目前預測方式，並在 K 線上標記買賣點
+                                // 回測目前預測方式，並在 K 線上標记買賣點
                                 var signals = TradingRecommendationLibrary.BuildBacktestSignals(displayData);
                                 DrawBacktestSignals(chartCanvas, displayData, signals, chartLeft, chartTop, chartBottom, candleSpacing, candleWidth, minPrice, priceRange);
 
@@ -1531,10 +1541,7 @@ namespace StockManager
 
                         if (_historicalData != null && _historicalData.Count > 0)
                         {
-                                DrawCandlestickChart(_historicalData, string.Equals(_currentPeriod, "5m", StringComparison.OrdinalIgnoreCase) ? _intradayBarCount : 0);
-                                DrawVolumeChart(_historicalData);
-                                DrawMacdChart(_historicalData);
-                                DrawRsiChart(_historicalData);
+                                RenderTrendModuleCharts(_historicalData, string.Equals(_currentPeriod, "5m", StringComparison.OrdinalIgnoreCase) ? _intradayBarCount : 0);
                         }
                 }
 
@@ -1547,9 +1554,67 @@ namespace StockManager
 
                         if (_historicalData != null && _historicalData.Count > 0)
                         {
-                                DrawVolumeChart(_historicalData);
-                                DrawMacdChart(_historicalData);
-                                DrawRsiChart(_historicalData);
+                                RenderTrendModuleCharts(_historicalData, string.Equals(_currentPeriod, "5m", StringComparison.OrdinalIgnoreCase) ? _intradayBarCount : 0);
+                        }
+                }
+
+                private void RenderTrendModuleCharts(List<CandlestickData> data, int candleCount)
+                {
+                        var displayData = GetDisplayData(data, candleCount);
+                        if (displayData == null || displayData.Count == 0)
+                        {
+                                if (trendChartModuleControl != null)
+                                {
+                                        trendChartModuleControl.Clear();
+                                }
+                                return;
+                        }
+
+                        var renderCandles = displayData
+                                .Select((c, idx) =>
+                                {
+                                        DateTime parsedDate;
+                                        if (!DateTime.TryParse(c.Date, out parsedDate))
+                                        {
+                                                parsedDate = DateTime.Today.AddMinutes(idx);
+                                        }
+
+                                        return new KLineRenderCandle
+                                        {
+                                                Date = parsedDate,
+                                                Open = c.Open,
+                                                High = c.High,
+                                                Low = c.Low,
+                                                Close = c.Close,
+                                                Volume = c.Volume,
+                                                ToolTipText =
+                                                        $"日期: {c.Date}\n" +
+                                                        $"開盤: ${c.Open:F2}\n" +
+                                                        $"最高: ${c.High:F2}\n" +
+                                                        $"最低: ${c.Low:F2}\n" +
+                                                        $"收盤: ${c.Close:F2}\n" +
+                                                        $"成交量: {c.Volume:N0}"
+                                        };
+                                })
+                                .ToList();
+
+                        if (trendChartModuleControl != null)
+                        {
+                                trendChartModuleControl.Render(renderCandles, _stockName, KLineChartTheme.Dim, 45, _trendChartFlags);
+                        }
+                }
+
+                private void ChartModuleFlag_Changed(object sender, RoutedEventArgs e)
+                {
+                        _trendChartFlags.ShowPriceChart = chkShowPriceChart != null && chkShowPriceChart.IsChecked == true;
+                        _trendChartFlags.ShowVolumeChart = chkShowVolumeChart != null && chkShowVolumeChart.IsChecked == true;
+                        _trendChartFlags.ShowMacdChart = chkShowMacdChart != null && chkShowMacdChart.IsChecked == true;
+                        _trendChartFlags.ShowRsiChart = chkShowRsiChart != null && chkShowRsiChart.IsChecked == true;
+                        _trendChartFlags.ShowBacktestOverlay = chkShowBacktestOverlay != null && chkShowBacktestOverlay.IsChecked == true;
+
+                        if (_historicalData != null && _historicalData.Count > 0)
+                        {
+                                RenderTrendModuleCharts(_historicalData, IsIntradayPeriod(_currentPeriod) ? _intradayBarCount : 0);
                         }
                 }
 
@@ -2145,161 +2210,161 @@ namespace StockManager
                                         var metricDetails = new List<string>();
                                         var fScore = 50;
 
-                                        double val;
-                                        if (metrics.TryGetValue("trailingPE", out val))
-                                        {
-                                                metricDetails.Add($"PE(TTM): {val:F2}");
-                                                if (val > 0 && val <= 25)
-                                                {
-                                                        fScore += 8;
-                                                        reasons.Add($"本益比 PE={val:F1} 處於合理區間");
-                                                }
-                                                else if (val > 40)
-                                                {
-                                                        fScore -= 8;
-                                                        reasons.Add($"本益比 PE={val:F1} 偏高，估值壓力較大");
-                                                }
-                                        }
+                                       double val;
+                                       if (metrics.TryGetValue("trailingPE", out val))
+                                       {
+                                               metricDetails.Add($"PE(TTM): {val:F2}");
+                                               if (val > 0 && val <= 25)
+                                               {
+                                                       fScore += 8;
+                                                       reasons.Add($"本益比 PE={val:F1} 處於合理區間");
+                                               }
+                                               else if (val > 40)
+                                               {
+                                                       fScore -= 8;
+                                                       reasons.Add($"本益比 PE={val:F1} 偏高，估值壓力較大");
+                                               }
+                                       }
 
-                                        if (metrics.TryGetValue("earningsGrowth", out val))
-                                        {
-                                                metricDetails.Add($"獲利成長率: {val * 100:F2}%");
-                                                if (val > 0.10)
-                                                {
-                                                        fScore += 10;
-                                                        reasons.Add($"獲利成長率 {val * 100:F1}% 表現良好");
-                                                }
-                                                else if (val < 0)
-                                                {
-                                                        fScore -= 10;
-                                                        reasons.Add($"獲利成長率 {val * 100:F1}% 為負，需留意");
-                                                }
-                                        }
+                                       if (metrics.TryGetValue("earningsGrowth", out val))
+                                       {
+                                               metricDetails.Add($"獲利成長率: {val * 100:F2}%");
+                                               if (val > 0.10)
+                                               {
+                                                       fScore += 10;
+                                                       reasons.Add($"獲利成長率 {val * 100:F1}% 表現良好");
+                                               }
+                                               else if (val < 0)
+                                               {
+                                                       fScore -= 10;
+                                                       reasons.Add($"獲利成長率 {val * 100:F1}% 為負，需留意");
+                                               }
+                                       }
 
-                                        if (metrics.TryGetValue("revenueGrowth", out val))
-                                        {
-                                                metricDetails.Add($"營收成長率: {val * 100:F2}%");
-                                                if (val > 0.08)
-                                                {
-                                                        fScore += 8;
-                                                        reasons.Add($"營收成長率 {val * 100:F1}% 具支撐");
-                                                }
-                                                else if (val < 0)
-                                                {
-                                                        fScore -= 8;
-                                                        reasons.Add($"營收成長率 {val * 100:F1}% 轉弱");
-                                                }
-                                        }
+                                       if (metrics.TryGetValue("revenueGrowth", out val))
+                                       {
+                                               metricDetails.Add($"營收成長率: {val * 100:F2}%");
+                                               if (val > 0.08)
+                                               {
+                                                       fScore += 8;
+                                                       reasons.Add($"營收成長率 {val * 100:F1}% 具支撐");
+                                               }
+                                               else if (val < 0)
+                                               {
+                                                       fScore -= 8;
+                                                       reasons.Add($"營收成長率 {val * 100:F1}% 轉弱");
+                                               }
+                                       }
 
-                                        if (metrics.TryGetValue("profitMargins", out val))
-                                        {
-                                                metricDetails.Add($"淨利率: {val * 100:F2}%");
-                                                if (val > 0.15)
-                                                {
-                                                        fScore += 6;
-                                                        reasons.Add($"淨利率 {val * 100:F1}% 健康");
-                                                }
-                                                else if (val < 0.05)
-                                                {
-                                                        fScore -= 6;
-                                                        reasons.Add($"淨利率 {val * 100:F1}% 偏低");
-                                                }
-                                        }
+                                       if (metrics.TryGetValue("profitMargins", out val))
+                                       {
+                                               metricDetails.Add($"淨利率: {val * 100:F2}%");
+                                               if (val > 0.15)
+                                               {
+                                                       fScore += 6;
+                                                       reasons.Add($"淨利率 {val * 100:F1}% 健康");
+                                               }
+                                               else if (val < 0.05)
+                                               {
+                                                       fScore -= 6;
+                                                       reasons.Add($"淨利率 {val * 100:F1}% 偏低");
+                                               }
+                                       }
 
-                                        if (metrics.TryGetValue("debtToEquity", out val))
-                                        {
-                                                metricDetails.Add($"負債權益比(D/E): {val:F2}");
-                                                if (val <= 100)
-                                                {
-                                                        fScore += 4;
-                                                        reasons.Add($"負債權益比 {val:F1} 風險可控");
-                                                }
-                                                else
-                                                {
-                                                        fScore -= 4;
-                                                        reasons.Add($"負債權益比 {val:F1} 偏高");
-                                                }
-                                        }
+                                       if (metrics.TryGetValue("debtToEquity", out val))
+                                       {
+                                               metricDetails.Add($"負債權益比(D/E): {val:F2}");
+                                               if (val <= 100)
+                                               {
+                                                       fScore += 4;
+                                                       reasons.Add($"負債權益比 {val:F1} 風險可控");
+                                               }
+                                               else
+                                               {
+                                                       fScore -= 4;
+                                                       reasons.Add($"負債權益比 {val:F1} 偏高");
+                                               }
+                                       }
 
-                                        if (metrics.TryGetValue("forwardPE", out val))
-                                        {
-                                                metricDetails.Add($"Forward PE: {val:F2}");
-                                                if (val > 0 && val <= 22)
-                                                {
-                                                        fScore += 4;
-                                                        reasons.Add($"預估本益比 {val:F1} 合理");
-                                                }
-                                                else if (val > 35)
-                                                {
-                                                        fScore -= 4;
-                                                        reasons.Add($"預估本益比 {val:F1} 偏高");
-                                                }
-                                        }
+                                       if (metrics.TryGetValue("forwardPE", out val))
+                                       {
+                                               metricDetails.Add($"Forward PE: {val:F2}");
+                                               if (val > 0 && val <= 22)
+                                               {
+                                                       fScore += 4;
+                                                       reasons.Add($"預估本益比 {val:F1} 合理");
+                                               }
+                                               else if (val > 35)
+                                               {
+                                                       fScore -= 4;
+                                                       reasons.Add($"預估本益比 {val:F1} 偏高");
+                                               }
+                                       }
 
-                                        if (metrics.TryGetValue("returnOnEquity", out val))
-                                        {
-                                                metricDetails.Add($"ROE: {val * 100:F2}%");
-                                                if (val >= 0.12)
-                                                {
-                                                        fScore += 6;
-                                                        reasons.Add($"ROE {val * 100:F1}% 顯示資本效率良好");
-                                                }
-                                                else if (val < 0.05)
-                                                {
-                                                        fScore -= 6;
-                                                        reasons.Add($"ROE {val * 100:F1}% 偏低");
-                                                }
-                                        }
+                                       if (metrics.TryGetValue("returnOnEquity", out val))
+                                       {
+                                               metricDetails.Add($"ROE: {val * 100:F2}%");
+                                               if (val >= 0.12)
+                                               {
+                                                       fScore += 6;
+                                                       reasons.Add($"ROE {val * 100:F1}% 顯示資本效率良好");
+                                               }
+                                               else if (val < 0.05)
+                                               {
+                                                       fScore -= 6;
+                                                       reasons.Add($"ROE {val * 100:F1}% 偏低");
+                                               }
+                                       }
 
-                                        if (metrics.TryGetValue("currentRatio", out val))
-                                        {
-                                                metricDetails.Add($"流動比率: {val:F2}");
-                                                if (val >= 1.2)
-                                                {
-                                                        fScore += 3;
-                                                        reasons.Add($"流動比率 {val:F2}，短期償債能力尚可");
-                                                }
-                                                else if (val < 1.0)
-                                                {
-                                                        fScore -= 3;
-                                                        reasons.Add($"流動比率 {val:F2} 偏低，需留意資金壓力");
-                                                }
-                                        }
+                                       if (metrics.TryGetValue("currentRatio", out val))
+                                       {
+                                               metricDetails.Add($"流動比率: {val:F2}");
+                                               if (val >= 1.2)
+                                               {
+                                                       fScore += 3;
+                                                       reasons.Add($"流動比率 {val:F2}，短期償債能力尚可");
+                                               }
+                                               else if (val < 1.0)
+                                               {
+                                                       fScore -= 3;
+                                                       reasons.Add($"流動比率 {val:F2} 偏低，需留意資金壓力");
+                                               }
+                                       }
 
-                                        if (metrics.TryGetValue("marketCap", out val))
-                                        {
-                                                metricDetails.Add($"市值: {FormatVolume((long)val)}");
-                                        }
+                                       if (metrics.TryGetValue("marketCap", out val))
+                                       {
+                                               metricDetails.Add($"市值: {FormatVolume((long)val)}");
+                                       }
 
-                                        fScore = Math.Max(0, Math.Min(100, fScore));
+                                       fScore = Math.Max(0, Math.Min(100, fScore));
 
-                                        if (reasons.Count == 0)
-                                        {
-                                                txtFundamentalAnalysis.Text = "財報欄位不足，暫無法給出有效基本面結論。";
-                                                return;
-                                        }
+                                       if (reasons.Count == 0)
+                                       {
+                                               txtFundamentalAnalysis.Text = "財報欄位不足，暫無法給出有效基本面結論。";
+                                               return;
+                                       }
 
-                                        var level = fScore >= 70 ? "偏正向" : (fScore >= 50 ? "中性" : "偏保守");
-                                        var action = fScore >= 75 ? "🟢 財報指標：偏買入" :
+                                       var level = fScore >= 70 ? "偏正向" : (fScore >= 50 ? "中性" : "偏保守");
+                                       var action = fScore >= 75 ? "🟢 財報指標：偏買入" :
                                                      fScore >= 55 ? "🟡 財報指標：觀望/持有" :
                                                      "🔴 財報指標：偏賣出或保守";
 
-                                        if (fScore >= 55)
-                                        {
-                                                txtFundamentalAnalysis.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1B5E20"));
-                                        }
-                                        else
-                                        {
-                                                txtFundamentalAnalysis.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#B71C1C"));
-                                        }
+                                       if (fScore >= 55)
+                                       {
+                                               txtFundamentalAnalysis.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1B5E20"));
+                                       }
+                                       else
+                                       {
+                                               txtFundamentalAnalysis.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#B71C1C"));
+                                       }
 
-                                        txtFundamentalAnalysis.Text =
-                                                $"財報評分：{fScore}/100（{level}）\n" +
-                                                $"{action}\n\n" +
-                                                "【核心財報數據】\n" +
-                                                string.Join("\n", metricDetails.Select(m => $"• {m}")) +
-                                                "\n\n【建議原因】\n" +
-                                                string.Join("\n", reasons.Select(r => $"• {r}"));
+                                       txtFundamentalAnalysis.Text =
+                                               $"財報評分：{fScore}/100（{level}）\n" +
+                                               $"{action}\n\n" +
+                                               "【核心財報數據】\n" +
+                                               string.Join("\n", metricDetails.Select(m => $"• {m}")) +
+                                               "\n\n【建議原因】\n" +
+                                               string.Join("\n", reasons.Select(r => $"• {r}"));
                         }
                         catch (Exception ex)
                         {
@@ -2683,6 +2748,125 @@ namespace StockManager
                 }
         }
 
+        public class TrendChartModuleControl : UserControl
+        {
+                private readonly StackPanel _root;
+                public Canvas PriceCanvas { get; private set; }
+                public Canvas VolumeCanvas { get; private set; }
+                public Canvas MacdCanvas { get; private set; }
+                public Canvas RsiCanvas { get; private set; }
+
+                public TrendChartModuleControl()
+                {
+                        _root = new StackPanel();
+
+                        PriceCanvas = CreateCanvasBlock("K 線價格走勢", 260, true);
+                        VolumeCanvas = CreateCanvasBlock("成交量", 110, false);
+                        MacdCanvas = CreateCanvasBlock("MACD", 110, false);
+                        RsiCanvas = CreateCanvasBlock("RSI", 110, false);
+
+                        Content = _root;
+                }
+
+                public void Clear()
+                {
+                        PriceCanvas.Children.Clear();
+                        VolumeCanvas.Children.Clear();
+                        MacdCanvas.Children.Clear();
+                        RsiCanvas.Children.Clear();
+                }
+
+                public void Render(
+                        IList<KLineRenderCandle> candles,
+                        string title,
+                        KLineChartTheme theme,
+                        int maxBars,
+                        TrendChartModuleFlags flags)
+                {
+                        flags = flags ?? TrendChartModuleFlags.All;
+
+                        var libFlags = new StockManager.Library.TrendChartModuleFlags
+                        {
+                                ShowPriceChart = flags.ShowPriceChart,
+                                ShowVolumeChart = flags.ShowVolumeChart,
+                                ShowMacdChart = flags.ShowMacdChart,
+                                ShowRsiChart = flags.ShowRsiChart,
+                                ShowBacktestOverlay = flags.ShowBacktestOverlay
+                        };
+
+                        KLineChartLibrary.RenderTrendModule(
+                                PriceCanvas,
+                                VolumeCanvas,
+                                MacdCanvas,
+                                RsiCanvas,
+                                candles,
+                                title,
+                                theme,
+                                maxBars,
+                                libFlags);
+
+                        ApplyVisibility(flags);
+                }
+
+                private void ApplyVisibility(TrendChartModuleFlags flags)
+                {
+                        var priceBlock = PriceCanvas.Parent as FrameworkElement;
+                        var volumeBlock = VolumeCanvas.Parent as FrameworkElement;
+                        var macdBlock = MacdCanvas.Parent as FrameworkElement;
+                        var rsiBlock = RsiCanvas.Parent as FrameworkElement;
+
+                        if (priceBlock != null) priceBlock.Visibility = flags.ShowPriceChart ? Visibility.Visible : Visibility.Collapsed;
+                        if (volumeBlock != null) volumeBlock.Visibility = flags.ShowVolumeChart ? Visibility.Visible : Visibility.Collapsed;
+                        if (macdBlock != null) macdBlock.Visibility = flags.ShowMacdChart ? Visibility.Visible : Visibility.Collapsed;
+                        if (rsiBlock != null) rsiBlock.Visibility = flags.ShowRsiChart ? Visibility.Visible : Visibility.Collapsed;
+                }
+
+                private Canvas CreateCanvasBlock(string title, double canvasHeight, bool first)
+                {
+                        if (!first)
+                        {
+                                _root.Children.Add(new TextBlock
+                                {
+                                        Text = title,
+                                        FontSize = 13,
+                                        FontWeight = FontWeights.SemiBold,
+                                        Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#B0BEC5")),
+                                        Margin = new Thickness(0, 15, 0, 6)
+                                });
+                        }
+                        else
+                        {
+                                _root.Children.Add(new TextBlock
+                                {
+                                        Text = title,
+                                        FontSize = 13,
+                                        FontWeight = FontWeights.SemiBold,
+                                        Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#B0BEC5")),
+                                        Margin = new Thickness(0, 0, 0, 6)
+                                });
+                        }
+
+                        var canvas = new Canvas
+                        {
+                                Height = canvasHeight,
+                                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1F2A3D"))
+                        };
+
+                        var border = new Border
+                        {
+                                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1F2A3D")),
+                                BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#2E3A4F")),
+                                BorderThickness = new Thickness(1),
+                                CornerRadius = new CornerRadius(5),
+                                Padding = new Thickness(10),
+                                Child = canvas
+                        };
+
+                        _root.Children.Add(border);
+                        return canvas;
+                }
+        }
+
         internal class LoadingProgressPopup : Window
         {
                 private readonly ProgressBar _progressBar;
@@ -2774,4 +2958,8 @@ namespace StockManager
                 public double BarWidth { get; set; }
                 public bool IsPositive { get; set; }
         }
+}
+
+namespace StockManager.Library
+{
 }

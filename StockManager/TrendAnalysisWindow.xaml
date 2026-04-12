@@ -1,6 +1,7 @@
 ﻿<Window x:Class="StockManager.TrendAnalysisWindow"
                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+				xmlns:local="clr-namespace:StockManager"
 				xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
                 Title="股票趨勢分析" Height="750" Width="1100"
                 WindowStartupLocation="CenterOwner" Background="#121722">
@@ -11,6 +12,7 @@
     <Window.Resources>
        <Style TargetType="ToolTip">
 			<Setter Property="Foreground" Value="Black"/>
+			<Setter Property="TextElement.Foreground" Value="Black"/>
 			<Setter Property="Background" Value="#F5F5F5"/>
 			<Setter Property="BorderBrush" Value="#B0BEC5"/>
 			<Setter Property="BorderThickness" Value="1"/>
@@ -290,30 +292,15 @@
 				<ScrollViewer x:Name="chartTab" VerticalScrollBarVisibility="Auto">
 					<StackPanel Margin="20">
 						<TextBlock Text="📊 價格走勢圖" FontSize="18" FontWeight="Bold" Foreground="#E3ECF5" Margin="0,0,0,15"/>
+						<WrapPanel Margin="0,0,0,10">
+							<CheckBox x:Name="chkShowPriceChart" Content="K線" IsChecked="True" Foreground="#D8E6F3" Margin="0,0,12,0" Checked="ChartModuleFlag_Changed" Unchecked="ChartModuleFlag_Changed"/>
+							<CheckBox x:Name="chkShowVolumeChart" Content="成交量" IsChecked="True" Foreground="#D8E6F3" Margin="0,0,12,0" Checked="ChartModuleFlag_Changed" Unchecked="ChartModuleFlag_Changed"/>
+							<CheckBox x:Name="chkShowMacdChart" Content="MACD" IsChecked="True" Foreground="#D8E6F3" Margin="0,0,12,0" Checked="ChartModuleFlag_Changed" Unchecked="ChartModuleFlag_Changed"/>
+							<CheckBox x:Name="chkShowRsiChart" Content="RSI" IsChecked="True" Foreground="#D8E6F3" Margin="0,0,12,0" Checked="ChartModuleFlag_Changed" Unchecked="ChartModuleFlag_Changed"/>
+							<CheckBox x:Name="chkShowBacktestOverlay" Content="回測訊號" IsChecked="True" Foreground="#D8E6F3" Checked="ChartModuleFlag_Changed" Unchecked="ChartModuleFlag_Changed"/>
+						</WrapPanel>
 
-						<!-- K 線主圖 -->
-						<TextBlock Text="K 線價格走勢" FontSize="13" FontWeight="SemiBold" Foreground="#B0BEC5" Margin="0,0,0,6"/>
-						<Border Background="#1F2A3D" BorderBrush="#2E3A4F" BorderThickness="1" CornerRadius="5" Padding="10" MinHeight="280">
-							<Canvas x:Name="chartCanvas" Height="250" Background="#1F2A3D" SizeChanged="ChartCanvas_SizeChanged" MouseMove="ChartCanvas_MouseMove" MouseLeave="ChartCanvas_MouseLeave"/>
-						</Border>
-
-						<!-- 成交量子圖 -->
-						<TextBlock Text="成交量" FontSize="13" FontWeight="SemiBold" Foreground="#B0BEC5" Margin="0,15,0,6"/>
-						<Border Background="#1F2A3D" BorderBrush="#2E3A4F" BorderThickness="1" CornerRadius="5" Padding="10" Height="140">
-							<Canvas x:Name="volumeCanvas" Height="110" Background="#1F2A3D" SizeChanged="IndicatorCanvas_SizeChanged"/>
-						</Border>
-
-						<!-- MACD 子圖 -->
-						<TextBlock Text="MACD" FontSize="13" FontWeight="SemiBold" Foreground="#B0BEC5" Margin="0,15,0,6"/>
-						<Border Background="#1F2A3D" BorderBrush="#2E3A4F" BorderThickness="1" CornerRadius="5" Padding="10" Height="140">
-							<Canvas x:Name="macdCanvas" Height="110" Background="#1F2A3D" SizeChanged="IndicatorCanvas_SizeChanged"/>
-						</Border>
-
-						<!-- RSI 子圖 -->
-						<TextBlock Text="RSI" FontSize="13" FontWeight="SemiBold" Foreground="#B0BEC5" Margin="0,15,0,6"/>
-						<Border Background="#1F2A3D" BorderBrush="#2E3A4F" BorderThickness="1" CornerRadius="5" Padding="10" Height="140">
-							<Canvas x:Name="rsiCanvas" Height="110" Background="#1F2A3D" SizeChanged="IndicatorCanvas_SizeChanged"/>
-						</Border>
+						<local:TrendChartModuleControl x:Name="trendChartModuleControl" MinHeight="600"/>
 					</StackPanel>
 				</ScrollViewer>
 
